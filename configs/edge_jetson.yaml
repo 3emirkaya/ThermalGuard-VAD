@@ -1,0 +1,30 @@
+# ThermalGuard-VAD Kenar Cihaz (NVIDIA Jetson / ARM / Gömülü Sistem) Konfigürasyonu
+# Düşük gecikme (<15ms) ve 30+ FPS hedefli hafifletilmiş profil
+
+preprocessing:
+  output_size: [128, 96]       # Küçültülmüş çözünürlük -> 2x hız artışı
+  agc: "percentile"
+  agc_low: 1.0
+  agc_high: 99.0
+  agc_ema: 0.6
+  dead_pixel: true
+  destripe: true
+  destripe_sigma: 6.0
+  denoise: "median"            # Jetson CPU/GPU'da bilateral'e göre çok daha hızlı
+  median_ksize: 3
+  clahe: true
+  clahe_clip: 2.0
+  clahe_grid: [4, 4]
+
+model:
+  in_ch: 1
+  widths: [16, 24, 48, 64]     # Hafifletilmiş kanal genişlikleri
+  latent: 48
+  lstm_hidden: [48]            # Tek katman ConvLSTM
+  objective: "reconstruct"
+
+inference:
+  clip_len: 6
+  threshold: 0.30
+  percentile: 99.0
+  temporal_smoothing: 0.5

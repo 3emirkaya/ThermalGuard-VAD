@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thermalguard-vad"
+version = "1.0.0"
+description = "Unsupervised Thermal Video Anomaly Detection for Defense Perimeter Surveillance"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Emir Kaya", email = "emirkaya1074@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "opencv-python>=4.7.0",
+    "numpy>=1.23.0",
+    "scipy>=1.9.0",
+    "scikit-learn>=1.2.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.6.0",
+    "tqdm>=4.64.0",
+    "imageio>=2.25.0",
+    "pillow>=9.0.0",
+    "onnx>=1.14.0",
+    "onnxruntime>=1.15.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

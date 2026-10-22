@@ -1,0 +1,45 @@
+# ThermalGuard-VAD Varsayılan Konfigürasyon
+# Savunma Sanayii ve Sınır Güvenliği Kızılötesi (LWIR) Video Anomali Tespiti
+
+preprocessing:
+  output_size: [160, 128]      # (Genişlik, Yükseklik)
+  agc: "percentile"            # 'percentile' | 'minmax' | 'none'
+  agc_low: 0.5
+  agc_high: 99.5
+  agc_ema: 0.7                 # Zamansal kazanç yumuşatma (parlaklık titremesi engeller)
+  dead_pixel: true
+  dead_pixel_thresh: 40.0
+  destripe: true               # Sabit Desen Gürültüsü (FPN sütun çizgileri) giderme
+  destripe_sigma: 8.0
+  destripe_ema: 0.8
+  denoise: "bilateral"         # 'bilateral' | 'nlm' | 'median' | 'gaussian' | 'none'
+  bilateral_d: 5
+  bilateral_sigma_color: 20.0
+  bilateral_sigma_space: 3.0
+  clahe: true                  # Contrast Limited Adaptive Histogram Equalization
+  clahe_clip: 2.0
+  clahe_grid: [8, 8]
+  temporal_ema: 0.0
+
+model:
+  in_ch: 1
+  widths: [16, 32, 64, 96]
+  latent: 64
+  lstm_hidden: [64, 64]
+  objective: "reconstruct"     # 'reconstruct' | 'predict'
+
+training:
+  clip_len: 8
+  stride: 2
+  batch_size: 8
+  epochs: 15
+  lr: 0.001
+  ssim_weight: 0.2
+  augment: true
+
+inference:
+  clip_len: 8
+  threshold: 0.11
+  percentile: 99.2
+  temporal_smoothing: 0.6
+  heatmap_colormap: "JET"
