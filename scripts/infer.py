@@ -46,6 +46,8 @@ from thermalguard.engine.infer import StreamingInferenceEngine
 from thermalguard.models.stae import STAE, build_model
 from thermalguard.preprocessing.thermal import ThermalPreprocessConfig, ThermalPreprocessor
 from thermalguard.visualization.overlay import DashboardVisualizer, save_demo_gif, save_demo_video
+from thermalguard.reporting.logger import EventLogger
+from thermalguard.reporting.llm_summary import LLMSummarizer
 
 
 def parse_args():
@@ -60,6 +62,12 @@ def parse_args():
     p.add_argument("--mp4", default="", help="Çıktı MP4 video yolu (opsiyonel)")
     p.add_argument("--device", default="", help="cuda | cpu | (boş = otomatik)")
     p.add_argument("--no-clahe", action="store_true", help="Ablasyon: CLAHE kapat")
+    # Yeni: Raporlama ve LLM
+    p.add_argument("--log-dir", default="logs", help="Olay kayıt klasörü (JSON + CSV)")
+    p.add_argument("--llm", default="rule",
+                   choices=["rule", "ollama", "openai", "google"],
+                   help="LLM özet arka ucu: rule (offline) | ollama | openai | google")
+    p.add_argument("--llm-model", default="", help="LLM model adı (boş → arka uca göre varsayılan)")
     return p.parse_args()
 
 
@@ -120,8 +128,32 @@ def main():
         threshold=args.threshold,
     )
 
+    # 3b. Olay Kaydı (EventLogger) + LLM Özet (LLMSummarizer)
+    summarizer = LLMSummarizer(
+        backend=args.llm,
+        model=args.llm_model or None,
+        fps=20.0,
+    )
+    logger = EventLogger(
+        log_dir=args.log_dir,
+        persist_frames=3,
+        max_gap_frames=15,
+    )
+
+    def _on_event(ev):
+        summary = summarizer.summarize_and_attach(ev, logger)
+        print(f"\n{'='*60}")
+        print(f"  [ALARM] Olay #{ev.event_id} | Kare: {ev.start_frame}–{ev.end_frame}")
+        print(f"  Zirve Skor: {ev.peak_score:.4f} | Süre: {ev.duration_frames} kare")
+        print(f"  LLM Özeti: {summary}")
+        print(f"{'='*60}")
+
+    logger._callback = _on_event
+
     # 4. Kare Akışını Başlat
     frames_generator = []
+    gt_labels = None
+    gt_masks = None
     if args.synthetic or not args.source:
         print("[i] Gömülü Fiziksel Termal Sınır Güvenliği Simülasyonu başlatılıyor...")
         print("    Senaryo: Yasak askeri bölgeye tel örgüyü aşarak sızan sıcak insan hedefi (Intrusion).")
@@ -157,12 +189,28 @@ def main():
     print("  ThermalGuard-VAD Gerçek Zamanlı Çıkarım Akışı")
     print("=" * 65)
 
+    gt_labels_arr = gt_labels if args.synthetic or not args.source else None
+
     for i, raw_frame in tqdm(frames_generator, desc="Çıkarım Yapılıyor", unit="kare"):
         res = engine.step(raw_frame)
         latencies.append(res.latency_ms)
 
         if res.is_anomaly:
             anomaly_counts += 1
+
+        # Anomali türünü GT etiketinden belirle (simülasyon)
+        anom_type = "unknown"
+        if args.synthetic and gt_labels_arr is not None and i < len(gt_labels_arr):
+            if gt_labels_arr[i] == 1:
+                anom_type = "intruder"
+
+        # Olay kaydını güncelle
+        logger.update(
+            frame_idx=res.frame_idx,
+            is_anomaly=res.is_anomaly,
+            anomaly_score=res.anomaly_score,
+            anomaly_type=anom_type,
+        )
 
         hud_frame = visualizer.render_frame(res)
         rendered_frames.append(hud_frame)
@@ -178,6 +226,18 @@ def main():
     print(f"  * Ortalama Gecikme (Latency): {avg_lat:.2f} ms / kare")
     print(f"  * Çıkarım Hızı (Throughput) : {avg_fps:.1f} FPS (Kenar Cihaz Gerçek Zamanlı Kriteri: >20 FPS [GEÇTİ])")
     print("=" * 65)
+
+    # Olay kaydını kapat ve özet yaz
+    all_events = logger.finalize()
+    print(f"\n[✓] Kayıtlı Anomali Olayları    : {len(all_events)}")
+    print(f"[✓] Olay Kayıt (JSON)           : {logger.json_path}")
+    print(f"[✓] Olay Kayıt (CSV)            : {logger.csv_path}")
+    if all_events:
+        print("\n  Olay Özetleri:")
+        for ev in all_events:
+            print(f"  #{ev.event_id}: Kare {ev.start_frame}-{ev.end_frame} | Skor: {ev.peak_score:.4f}")
+            if ev.llm_summary:
+                print(f"      → {ev.llm_summary}")
 
     # 5. Görsel Çıktıları Kaydet
     if args.gif and rendered_frames:
