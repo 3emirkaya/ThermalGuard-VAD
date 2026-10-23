@@ -57,3 +57,4 @@ data/kaist_survey/
 scratch/
 part/
 *.part
+logs/

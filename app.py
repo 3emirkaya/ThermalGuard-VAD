@@ -221,319 +221,377 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ThermalGuard-VAD — Kızılötesi Anomali Tespit Sistemi Canlı Dashboard">
+  <meta name="description" content="ThermalGuard-VAD — Kızılötesi Video Anomali Tespit Sistemi">
   <title>ThermalGuard-VAD | Termal Anomali İzleme</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-primary: #0a0c12;
-      --bg-secondary: #111420;
-      --bg-card: #161b2e;
-      --bg-card-hover: #1c2240;
-      --border: #1e2d4a;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --card-subtle: #f1f5f9;
+      --border: #e2e8f0;
+      --border-focus: #94a3b8;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --text-subtle: #94a3b8;
+      --btn-primary: #0f172a;
+      --btn-primary-hover: #1e293b;
+      --btn-primary-text: #ffffff;
+      --accent-blue: #2563eb;
+      --accent-red: #dc2626;
+      --accent-red-bg: #fef2f2;
+      --accent-red-border: #fecaca;
+      --accent-green: #16a34a;
+      --accent-green-bg: #f0fdf4;
+      --accent-green-border: #bbf7d0;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-subtle: #0f172a;
+      --border: #334155;
+      --border-focus: #64748b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-subtle: #64748b;
+      --btn-primary: #f8fafc;
+      --btn-primary-hover: #e2e8f0;
+      --btn-primary-text: #0f172a;
       --accent-blue: #3b82f6;
-      --accent-cyan: #06b6d4;
-      --accent-green: #10b981;
       --accent-red: #ef4444;
-      --accent-orange: #f59e0b;
-      --accent-purple: #8b5cf6;
-      --text-primary: #e2e8f0;
-      --text-secondary: #94a3b8;
-      --text-muted: #475569;
-      --glow-blue: 0 0 20px rgba(59, 130, 246, 0.3);
-      --glow-red: 0 0 20px rgba(239, 68, 68, 0.4);
-      --glow-green: 0 0 20px rgba(16, 185, 129, 0.3);
+      --accent-red-bg: #451a1a;
+      --accent-red-border: #7f1d1d;
+      --accent-green: #22c55e;
+      --accent-green-bg: #143521;
+      --accent-green-border: #166534;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Inter', sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
       min-height: 100vh;
-      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
-    /* ---- Animated background grid ---- */
-    body::before {
-      content: '';
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-image:
-        linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
-      background-size: 40px 40px;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    /* ---- Header ---- */
+    /* Header */
     header {
-      position: relative;
-      z-index: 10;
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 28px;
-      background: rgba(17, 20, 32, 0.95);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(10px);
+      gap: 16px;
     }
 
-    .header-logo {
+    .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
-    .logo-icon {
-      width: 38px; height: 38px;
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-      box-shadow: var(--glow-blue);
-    }
-
-    .logo-text h1 {
-      font-size: 18px;
+    .brand-title {
+      font-size: 17px;
       font-weight: 700;
-      background: linear-gradient(90deg, #60a5fa, #22d3ee);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--text);
+      letter-spacing: -0.02em;
     }
 
-    .logo-text p {
+    .brand-badge {
       font-size: 11px;
-      color: var(--text-muted);
-      font-family: 'JetBrains Mono', monospace;
-      letter-spacing: 0.05em;
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    /* ---- Status Badge ---- */
-    .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 14px;
-      border-radius: 99px;
-      font-size: 12px;
       font-weight: 600;
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 2px 7px;
+      border-radius: 4px;
       letter-spacing: 0.05em;
-      border: 1px solid;
-      transition: all 0.3s ease;
     }
 
-    .status-badge.idle { border-color: var(--text-muted); color: var(--text-muted); }
-    .status-badge.running { border-color: var(--accent-green); color: var(--accent-green); box-shadow: var(--glow-green); }
-    .status-badge.done { border-color: var(--accent-blue); color: var(--accent-blue); }
-    .status-badge.error { border-color: var(--accent-red); color: var(--accent-red); }
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: none;
+    }
+
+    @media (min-width: 768px) {
+      .brand-sub { display: inline; border-left: 1px solid var(--border); padding-left: 10px; }
+    }
+
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Status Pill */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--card-subtle);
+      color: var(--text-muted);
+    }
 
     .status-dot {
-      width: 7px; height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: currentColor;
     }
-    .status-badge.running .status-dot {
-      animation: pulse 1.2s ease-in-out infinite;
+
+    .status-badge.idle { color: var(--text-muted); }
+    .status-badge.running {
+      color: var(--accent-green);
+      background: var(--accent-green-bg);
+      border-color: var(--accent-green-border);
+    }
+    .status-badge.done {
+      color: var(--accent-blue);
+      border-color: var(--border);
+    }
+    .status-badge.error {
+      color: var(--accent-red);
+      background: var(--accent-red-bg);
+      border-color: var(--accent-red-border);
     }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.4; transform: scale(0.7); }
-    }
-
-    /* ---- Buttons ---- */
-    .btn {
-      padding: 8px 18px;
-      border-radius: 8px;
+    /* Buttons & Inputs */
+    select {
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
       font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      border: none;
       outline: none;
-      letter-spacing: 0.02em;
+      cursor: pointer;
+    }
+    select:focus { border-color: var(--border-focus); }
+
+    .btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      outline: none;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.15s ease, opacity 0.15s ease;
     }
 
     .btn-primary {
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
-      color: white;
+      background: var(--btn-primary);
+      color: var(--btn-primary-text);
     }
-    .btn-primary:hover { opacity: 0.85; transform: translateY(-1px); box-shadow: var(--glow-blue); }
-    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-danger {
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--accent-red);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      background: var(--accent-red);
+      color: #ffffff;
     }
-    .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
+    .btn-danger:hover { opacity: 0.9; }
 
-    /* ---- Main Layout ---- */
+    .btn-secondary {
+      background: var(--card-bg);
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn-secondary:hover { background: var(--card-subtle); }
+
+    .btn-icon {
+      padding: 6px 9px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .btn-icon:hover { color: var(--text); background: var(--card-subtle); }
+
+    /* Layout */
     main {
-      position: relative;
-      z-index: 1;
-      max-width: 1600px;
+      flex: 1;
+      max-width: 1500px;
+      width: 100%;
       margin: 0 auto;
       padding: 20px 24px;
       display: grid;
-      grid-template-columns: 1fr 380px;
+      grid-template-columns: 1fr 360px;
       gap: 20px;
     }
 
-    .left-column { display: flex; flex-direction: column; gap: 18px; }
-    .right-column { display: flex; flex-direction: column; gap: 18px; }
-
-    /* ---- Cards ---- */
-    .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      transition: border-color 0.3s ease;
+    @media (max-width: 1024px) {
+      main { grid-template-columns: 1fr; }
     }
-    .card:hover { border-color: rgba(59, 130, 246, 0.3); }
+
+    .column-left { display: flex; flex-direction: column; gap: 18px; }
+    .column-right { display: flex; flex-direction: column; gap: 18px; }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
 
     .card-header {
-      padding: 14px 18px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: rgba(255,255,255,0.02);
     }
 
     .card-title {
       font-size: 13px;
       font-weight: 600;
-      color: var(--text-secondary);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      color: var(--text);
+      letter-spacing: -0.01em;
     }
 
-    .card-title .icon {
-      font-size: 16px;
+    .card-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: monospace;
     }
 
-    .card-body { padding: 16px 18px; }
+    .card-body { padding: 16px; }
 
-    /* ---- Stream ---- */
+    /* Stream */
     .stream-container {
-      position: relative;
       width: 100%;
-      background: #000;
-      border-radius: 0 0 13px 13px;
+      background: #090d16;
+      border-radius: 0 0 7px 7px;
       min-height: 380px;
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
+      position: relative;
     }
 
     #stream-img {
       max-width: 100%;
-      max-height: 540px;
-      object-fit: contain;
+      max-height: 520px;
       display: block;
+      object-fit: contain;
     }
 
     .stream-placeholder {
       text-align: center;
-      color: var(--text-muted);
-      padding: 60px 20px;
+      color: #64748b;
+      padding: 48px 20px;
     }
-    .stream-placeholder .icon { font-size: 48px; margin-bottom: 12px; }
-    .stream-placeholder p { font-size: 14px; }
+    .stream-placeholder p { font-size: 13px; margin-top: 6px; }
 
-    /* ---- Metrics ---- */
+    /* Score Graph */
+    #score-canvas {
+      width: 100%;
+      height: 140px;
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card-bg);
+    }
+
+    .score-meter {
+      margin-top: 12px;
+    }
+
+    .score-meter-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 6px;
+      color: var(--text-muted);
+    }
+
+    .score-value {
+      font-family: monospace;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .score-bar {
+      height: 6px;
+      background: var(--card-subtle);
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .score-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-blue);
+      transition: width 0.2s ease, background 0.2s ease;
+    }
+
+    /* Metrics Grid */
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
+      gap: 10px;
     }
 
-    .metric-card {
-      background: rgba(255,255,255,0.03);
+    .metric-box {
+      background: var(--card-subtle);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-      transition: all 0.2s ease;
-    }
-
-    .metric-card:hover {
-      background: rgba(255,255,255,0.05);
-      transform: translateY(-1px);
+      border-radius: 6px;
+      padding: 12px;
     }
 
     .metric-label {
       font-size: 11px;
+      font-weight: 500;
       color: var(--text-muted);
-      font-family: 'JetBrains Mono', monospace;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
 
-    .metric-value {
-      font-size: 24px;
+    .metric-number {
+      font-size: 20px;
       font-weight: 700;
-      font-family: 'JetBrains Mono', monospace;
-      background: linear-gradient(90deg, #60a5fa, #22d3ee);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--text);
+      font-family: monospace;
+      letter-spacing: -0.02em;
     }
 
     .metric-unit {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-top: 3px;
+      font-size: 11px;
+      color: var(--text-subtle);
     }
 
-    /* ---- Score Graph (canvas) ---- */
-    #score-canvas {
-      width: 100%;
-      height: 140px;
-      background: rgba(0,0,0,0.3);
-      border-radius: 8px;
-      display: block;
-    }
-
-    /* ---- Alert Feed ---- */
+    /* Alert Feed */
     .alert-feed {
-      max-height: 380px;
+      max-height: 400px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 10px;
     }
 
-    .alert-feed::-webkit-scrollbar { width: 4px; }
-    .alert-feed::-webkit-scrollbar-track { background: transparent; }
-    .alert-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-
     .alert-item {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      border-radius: 10px;
-      padding: 12px 14px;
-      animation: slideIn 0.4s ease;
-    }
-
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateX(20px); }
-      to { opacity: 1; transform: translateX(0); }
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent-red);
+      border-radius: 6px;
+      padding: 12px;
     }
 
     .alert-header {
@@ -544,167 +602,119 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     .alert-badge {
-      background: var(--accent-red);
-      color: white;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 99px;
-      letter-spacing: 0.05em;
+      font-size: 11px;
+      font-weight: 600;
+      background: var(--accent-red-bg);
+      border: 1px solid var(--accent-red-border);
+      color: var(--accent-red);
+      padding: 1px 7px;
+      border-radius: 4px;
     }
 
     .alert-time {
       font-size: 11px;
       color: var(--text-muted);
-      font-family: 'JetBrains Mono', monospace;
+      font-family: monospace;
     }
 
-    .alert-score {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--accent-orange);
+    .alert-meta {
+      display: flex;
+      gap: 12px;
+      font-size: 11px;
+      color: var(--text-muted);
       margin-bottom: 6px;
-      font-family: 'JetBrains Mono', monospace;
     }
+    .alert-meta strong { color: var(--text); }
 
     .alert-summary {
       font-size: 12px;
-      color: var(--text-secondary);
+      color: var(--text);
       line-height: 1.5;
+      background: var(--card-subtle);
+      padding: 8px 10px;
+      border-radius: 4px;
     }
 
     .no-events {
       text-align: center;
-      padding: 40px 20px;
+      padding: 32px 16px;
       color: var(--text-muted);
       font-size: 13px;
     }
-    .no-events .icon { font-size: 32px; margin-bottom: 8px; }
 
-    /* ---- Score bar ---- */
-    .score-bar-wrap {
-      margin-top: 10px;
-    }
-
-    .score-bar-label {
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      background: var(--card-bg);
+      padding: 12px 24px;
+      font-size: 12px;
+      color: var(--text-muted);
       display: flex;
       justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 6px;
-    }
-
-    .score-bar {
-      height: 8px;
-      background: rgba(255,255,255,0.07);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-
-    .score-bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.3s ease, background 0.3s ease;
-    }
-
-    /* ---- Alarm flash ---- */
-    .alarm-flash {
-      animation: alarmFlash 0.6s ease 3;
-    }
-
-    @keyframes alarmFlash {
-      0%, 100% { box-shadow: none; }
-      50% { box-shadow: 0 0 30px rgba(239,68,68,0.6), inset 0 0 20px rgba(239,68,68,0.1); }
-    }
-
-    /* ---- LLM select ---- */
-    select {
-      background: var(--bg-secondary);
-      color: var(--text-primary);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 5px 10px;
-      font-size: 12px;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-      outline: none;
-    }
-    select:hover { border-color: var(--accent-blue); }
-
-    /* ---- Footer ---- */
-    footer {
-      text-align: center;
-      padding: 16px;
-      color: var(--text-muted);
-      font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
-      border-top: 1px solid var(--border);
-      position: relative;
-      z-index: 1;
+      align-items: center;
+      margin-top: auto;
     }
   </style>
 </head>
 <body>
 
 <header>
-  <div class="header-logo">
-    <div class="logo-icon">🌡️</div>
-    <div class="logo-text">
-      <h1>ThermalGuard-VAD</h1>
-      <p>INFRARED ANOMALY DETECTION SYSTEM v2.0</p>
-    </div>
+  <div class="brand">
+    <span class="brand-title">ThermalGuard</span>
+    <span class="brand-badge">VAD</span>
+    <span class="brand-sub">Kızılötesi Video Anomali Tespit Sistemi</span>
   </div>
-  <div class="header-actions">
+  <div class="header-controls">
     <span id="status-badge" class="status-badge idle">
       <span class="status-dot"></span>
-      <span id="status-text">HAZIR</span>
+      <span id="status-text">Hazır</span>
     </span>
-    <select id="llm-select" title="LLM Özet Arka Ucu">
-      <option value="rule">🔵 Kural Tabanlı (Offline)</option>
-      <option value="ollama">🟣 Ollama (Lokal LLM)</option>
-      <option value="openai">🟢 OpenAI GPT</option>
-      <option value="google">🟡 Google Gemini</option>
+    <select id="llm-select" title="LLM Rapor Özeti Modeli">
+      <option value="rule">Kural Tabanlı (Çevrimdışı)</option>
+      <option value="ollama">Ollama (Lokal LLM)</option>
+      <option value="openai">OpenAI GPT</option>
+      <option value="google">Google Gemini</option>
     </select>
-    <button id="start-btn" class="btn btn-primary" onclick="startDemo()">▶ Demo Başlat</button>
-    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">⏹ Durdur</button>
-    <a href="/report" target="_blank" class="btn btn-primary" style="text-decoration:none; background: linear-gradient(135deg,#8b5cf6,#6366f1)">📄 Rapor</a>
+    <button id="start-btn" class="btn btn-primary" onclick="startDemo()">Demo Başlat</button>
+    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">Durdur</button>
+    <a href="/report" target="_blank" class="btn btn-secondary">Rapor</a>
+    <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Açık/Koyu Tema">🌙</button>
   </div>
 </header>
 
 <main>
   <!-- SOL KOLON -->
-  <div class="left-column">
+  <div class="column-left">
 
-    <!-- Canlı Video Akışı -->
+    <!-- Video Akışı -->
     <div class="card" id="stream-card">
       <div class="card-header">
-        <span class="card-title"><span class="icon">📡</span> CANLI TERMAL AKIŞ</span>
-        <span id="fps-badge" style="font-size:12px;color:var(--accent-cyan);font-family:'JetBrains Mono',monospace">0.0 FPS</span>
+        <span class="card-title">Canlı Termal Akış</span>
+        <span id="fps-badge" class="card-subtitle">0.0 FPS</span>
       </div>
       <div class="stream-container">
         <div id="stream-placeholder" class="stream-placeholder">
-          <div class="icon">🌡️</div>
-          <p>Demo başlatıldığında canlı termal akış burada görünecek.</p>
+          <p>Demo başlatıldığında termal video akışı burada gösterilecektir.</p>
         </div>
         <img id="stream-img" src="" alt="Termal Akış" style="display:none">
       </div>
     </div>
 
-    <!-- Anlık Skor Grafiği (Canvas) -->
+    <!-- Skor Grafiği -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title"><span class="icon">📈</span> ANOMALİ SKORU AKIŞI</span>
-        <span style="font-size:11px;color:var(--text-muted)">Son 300 kare</span>
+        <span class="card-title">Anomali Skoru Akışı</span>
+        <span class="card-subtitle">Son 300 kare</span>
       </div>
       <div class="card-body">
         <canvas id="score-canvas"></canvas>
-        <div class="score-bar-wrap" style="margin-top:12px">
-          <div class="score-bar-label">
-            <span>Anlık Skor</span>
-            <span id="score-label" style="font-family:'JetBrains Mono',monospace;font-weight:600">0.00000</span>
+        <div class="score-meter">
+          <div class="score-meter-header">
+            <span>Anlık Skor: <span id="score-label" class="score-value">0.00000</span></span>
+            <span>Eşik: 0.20000</span>
           </div>
           <div class="score-bar">
-            <div id="score-bar-fill" class="score-bar-fill" style="width:0%;background:var(--accent-green)"></div>
+            <div id="score-bar-fill" class="score-bar-fill"></div>
           </div>
         </div>
       </div>
@@ -713,51 +723,48 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
   <!-- SAĞ KOLON -->
-  <div class="right-column">
+  <div class="column-right">
 
-    <!-- Metrikler -->
+    <!-- Sistem Metrikleri -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title"><span class="icon">⚡</span> SİSTEM METRİKLERİ</span>
+        <span class="card-title">Sistem Metrikleri</span>
       </div>
       <div class="card-body">
         <div class="metrics-grid">
-          <div class="metric-card">
+          <div class="metric-box">
             <div class="metric-label">İşlenen Kare</div>
-            <div class="metric-value" id="m-frames">0</div>
+            <div class="metric-number" id="m-frames">0</div>
             <div class="metric-unit">kare</div>
           </div>
-          <div class="metric-card">
+          <div class="metric-box">
             <div class="metric-label">Anomali Karesi</div>
-            <div class="metric-value" id="m-anomalies" style="background:linear-gradient(90deg,#ef4444,#f97316);-webkit-background-clip:text">0</div>
+            <div class="metric-number" id="m-anomalies">0</div>
             <div class="metric-unit">tespit</div>
           </div>
-          <div class="metric-card">
+          <div class="metric-box">
             <div class="metric-label">Olay Sayısı</div>
-            <div class="metric-value" id="m-events" style="background:linear-gradient(90deg,#8b5cf6,#ec4899);-webkit-background-clip:text">0</div>
+            <div class="metric-number" id="m-events">0</div>
             <div class="metric-unit">alarm</div>
           </div>
-          <div class="metric-card">
-            <div class="metric-label">FPS</div>
-            <div class="metric-value" id="m-fps">0.0</div>
+          <div class="metric-box">
+            <div class="metric-label">İşleme Hızı</div>
+            <div class="metric-number" id="m-fps">0.0</div>
             <div class="metric-unit">kare/sn</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Alarm Akışı -->
+    <!-- Olay Günlüğü -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title"><span class="icon">🚨</span> ANLİK ALARM AKIŞI</span>
-        <span id="event-count-badge" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:var(--accent-red);font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600">0 olay</span>
+        <span class="card-title">Olay Günlüğü</span>
+        <span id="event-count-badge" class="card-subtitle">0 olay</span>
       </div>
-      <div class="card-body" style="padding:10px 14px">
+      <div class="card-body" style="padding: 12px;">
         <div class="alert-feed" id="alert-feed">
-          <div class="no-events">
-            <div class="icon">🛡️</div>
-            <p>Henüz anomali tespit edilmedi.</p>
-          </div>
+          <div class="no-events">Henüz anomali olayı kaydedilmedi.</div>
         </div>
       </div>
     </div>
@@ -766,21 +773,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </main>
 
 <footer>
-  ThermalGuard-VAD &nbsp;|&nbsp; Spatio-Temporal Autoencoder (STAE) + ConvLSTM &nbsp;|&nbsp; KAIST LWIR Dataset Compatible
+  <span>ThermalGuard-VAD &bull; SAYZEK Proje Başvurusu</span>
+  <span>Spatio-Temporal Autoencoder + ConvLSTM</span>
 </footer>
 
 <script>
-  // ------------------------------------------------------------------ //
-  //  Global durum
-  // ------------------------------------------------------------------ //
   let scoreHistory = [];
   let knownEvents = 0;
   let pollInterval = null;
   let streamRetry = 0;
+  let currentThreshold = 0.20;
 
-  // ------------------------------------------------------------------ //
-  //  Demo Kontrol
-  // ------------------------------------------------------------------ //
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('tg_theme', next);
+    const btn = document.getElementById('theme-btn');
+    if (btn) btn.textContent = next === 'dark' ? '☀️' : '🌙';
+    drawScoreGraph(currentThreshold);
+  }
+
+  (function initTheme() {
+    const saved = localStorage.getItem('tg_theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    window.addEventListener('DOMContentLoaded', () => {
+      const btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      drawScoreGraph(currentThreshold);
+    });
+  })();
+
   function startDemo() {
     const llm = document.getElementById('llm-select').value;
     fetch('/api/run_demo?llm=' + llm, { method: 'POST' })
@@ -804,9 +827,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     stopPolling();
   }
 
-  // ------------------------------------------------------------------ //
-  //  MJPEG Akış
-  // ------------------------------------------------------------------ //
   function startStream() {
     const img = document.getElementById('stream-img');
     const placeholder = document.getElementById('stream-placeholder');
@@ -821,9 +841,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     };
   }
 
-  // ------------------------------------------------------------------ //
-  //  Durum Polling
-  // ------------------------------------------------------------------ //
   function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(poll, 500);
@@ -847,43 +864,38 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').style.display = 'none';
       }
-    } catch (e) { /* network hatası */ }
+    } catch (e) { /* ağ gecikmesi */ }
   }
 
   function updateStatus(s) {
-    // Metrikler
     document.getElementById('m-frames').textContent = s.frame_count;
     document.getElementById('m-anomalies').textContent = s.anomaly_count;
     document.getElementById('m-events').textContent = s.event_count;
     document.getElementById('m-fps').textContent = s.fps.toFixed(1);
     document.getElementById('fps-badge').textContent = s.fps.toFixed(1) + ' FPS';
 
-    // Skor bar
+    currentThreshold = s.threshold || 0.20;
     const score = s.latest_score;
-    const pct = Math.min(score / (s.threshold * 2) * 100, 100);
+    const pct = Math.min((score / (currentThreshold * 2)) * 100, 100);
     const fill = document.getElementById('score-bar-fill');
     fill.style.width = pct + '%';
-    fill.style.background = score >= s.threshold
-      ? 'linear-gradient(90deg,#ef4444,#f97316)'
-      : 'linear-gradient(90deg,#10b981,#06b6d4)';
+    fill.style.background = score >= currentThreshold ? 'var(--accent-red)' : 'var(--accent-blue)';
     document.getElementById('score-label').textContent = score.toFixed(5);
 
-    // Status badge
     const badge = document.getElementById('status-badge');
     const statusMap = {
-      idle: ['idle','HAZIR'],
-      running: ['running','ÇALIŞIYOR'],
-      done: ['done','TAMAMLANDI'],
-      error: ['error','HATA'],
+      idle: ['idle', 'Hazır'],
+      running: ['running', 'Çalışıyor'],
+      done: ['done', 'Tamamlandı'],
+      error: ['error', 'Hata'],
     };
-    const [cls, txt] = statusMap[s.status] || ['idle','HAZIR'];
+    const [cls, txt] = statusMap[s.status] || ['idle', 'Hazır'];
     badge.className = 'status-badge ' + cls;
     document.getElementById('status-text').textContent = txt;
 
-    // Score history — grafik için
     fetch('/api/score_history').then(r => r.json()).then(h => {
       scoreHistory = h;
-      drawScoreGraph(s.threshold);
+      drawScoreGraph(currentThreshold);
     }).catch(() => {});
   }
 
@@ -892,10 +904,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     document.getElementById('m-events').textContent = events.length;
     if (events.length === knownEvents) return;
 
-    // Yeni olaylar var → ekle
     const feed = document.getElementById('alert-feed');
-    if (events.length === 1 && knownEvents === 0) {
-      feed.innerHTML = ''; // "henüz anomali yok" mesajını kaldır
+    if (events.length > 0 && knownEvents === 0) {
+      feed.innerHTML = '';
     }
 
     for (let i = knownEvents; i < events.length; i++) {
@@ -908,85 +919,115 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <span class="alert-badge">ALARM #${ev.event_id}</span>
           <span class="alert-time">${startTime}</span>
         </div>
-        <div class="alert-score">
-          Zirve: ${ev.peak_score.toFixed(4)} &nbsp;|&nbsp; ${ev.duration_frames} kare
+        <div class="alert-meta">
+          <span>Zirve Skor: <strong>${ev.peak_score.toFixed(4)}</strong></span>
+          <span>Süre: <strong>${ev.duration_frames} kare</strong></span>
+          <span>Tür: <strong>${ev.anomaly_type || 'Bilinmiyor'}</strong></span>
         </div>
-        <div class="alert-summary">${ev.llm_summary || '(LLM özeti bekleniyor...)'}</div>
+        <div class="alert-summary">${ev.llm_summary || '(LLM özeti oluşturuluyor...)'}</div>
       `;
       feed.prepend(card);
-
-      // Stream kartına flash efekti
-      document.getElementById('stream-card').classList.add('alarm-flash');
-      setTimeout(() => document.getElementById('stream-card').classList.remove('alarm-flash'), 2000);
     }
     knownEvents = events.length;
   }
 
-  // ------------------------------------------------------------------ //
-  //  Canvas Skor Grafiği
-  // ------------------------------------------------------------------ //
   function drawScoreGraph(threshold) {
     const canvas = document.getElementById('score-canvas');
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const W = canvas.offsetWidth;
     const H = canvas.offsetHeight;
+    if (W === 0 || H === 0) return;
     canvas.width = W;
     canvas.height = H;
 
-    ctx.clearRect(0, 0, W, H);
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const bgColor = isDark ? '#1e293b' : '#ffffff';
+    const textColor = isDark ? '#94a3b8' : '#64748b';
+    const gridColor = isDark ? '#334155' : '#f1f5f9';
+
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, W, H);
 
     if (!scoreHistory || scoreHistory.length < 2) {
-      ctx.fillStyle = '#475569';
-      ctx.font = '12px Inter';
+      ctx.fillStyle = textColor;
+      ctx.font = '12px -apple-system, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Veri bekleniyor...', W/2, H/2);
+      ctx.fillText('Veri bekleniyor...', W / 2, H / 2);
       return;
     }
 
-    const pad = { l: 10, r: 10, t: 10, b: 10 };
+    const pad = { l: 40, r: 16, t: 14, b: 20 };
     const pw = W - pad.l - pad.r;
     const ph = H - pad.t - pad.b;
 
     const scores = scoreHistory.map(s => s.score);
-    const maxY = Math.max(threshold * 2, ...scores, 0.5);
+    const maxY = Math.max(threshold * 1.8, ...scores, 0.4);
 
-    // Threshold line
-    const ty = pad.t + ph * (1 - threshold / maxY);
-    ctx.strokeStyle = 'rgba(239,68,68,0.5)';
+    // Kılavuz çizgileri
+    ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
-    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (let s = 0; s <= 3; s++) {
+      const yVal = (maxY / 3) * s;
+      const yPos = pad.t + ph * (1 - yVal / maxY);
+      ctx.moveTo(pad.l, yPos);
+      ctx.lineTo(pad.l + pw, yPos);
+    }
+    ctx.stroke();
+
+    // Y ekseni etiketleri
+    ctx.fillStyle = textColor;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    for (let s = 0; s <= 3; s++) {
+      const yVal = (maxY / 3) * s;
+      const yPos = pad.t + ph * (1 - yVal / maxY);
+      ctx.fillText(yVal.toFixed(2), pad.l - 6, yPos + 3);
+    }
+
+    // Eşik çizgisi
+    const ty = pad.t + ph * (1 - threshold / maxY);
+    ctx.strokeStyle = '#dc2626';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(pad.l, ty);
     ctx.lineTo(pad.l + pw, ty);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Score line
-    ctx.lineWidth = 2;
+    ctx.fillStyle = '#dc2626';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('Eşik (' + threshold.toFixed(2) + ')', pad.l + 6, ty - 4);
+
+    // Skor çizgisi
+    ctx.lineWidth = 1.8;
     ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
 
     for (let i = 1; i < scoreHistory.length; i++) {
       const x1 = pad.l + ((i - 1) / (scoreHistory.length - 1)) * pw;
-      const y1 = pad.t + ph * (1 - Math.min(scoreHistory[i-1].score, maxY) / maxY);
+      const y1 = pad.t + ph * (1 - Math.min(scoreHistory[i - 1].score, maxY) / maxY);
       const x2 = pad.l + (i / (scoreHistory.length - 1)) * pw;
       const y2 = pad.t + ph * (1 - Math.min(scoreHistory[i].score, maxY) / maxY);
 
       const isAnomaly = scoreHistory[i].score >= threshold;
-      ctx.strokeStyle = isAnomaly ? '#ef4444' : '#10b981';
-      ctx.lineWidth = isAnomaly ? 2.5 : 1.5;
+      ctx.strokeStyle = isAnomaly ? '#dc2626' : (isDark ? '#60a5fa' : '#2563eb');
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
     }
 
-    // Last point dot
+    // Son nokta
     const last = scoreHistory[scoreHistory.length - 1];
     const lx = pad.l + pw;
     const ly = pad.t + ph * (1 - Math.min(last.score, maxY) / maxY);
-    ctx.fillStyle = last.score >= threshold ? '#ef4444' : '#10b981';
+    ctx.fillStyle = last.score >= threshold ? '#dc2626' : (isDark ? '#60a5fa' : '#2563eb');
     ctx.beginPath();
-    ctx.arc(lx, ly, 4, 0, Math.PI * 2);
+    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
     ctx.fill();
   }
 </script>
@@ -999,37 +1040,136 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <title>ThermalGuard-VAD | Anomali Raporu</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter',sans-serif; background:#0f1117; color:#e2e8f0; margin:0; padding:32px; }
-    h1 { font-size:24px; font-weight:700; color:#60a5fa; margin-bottom:4px; }
-    .sub { color:#64748b; font-size:13px; margin-bottom:32px; }
-    .stats { display:flex; gap:16px; margin-bottom:32px; }
-    .stat { background:#161b2e; border:1px solid #1e2d4a; border-radius:10px; padding:16px 20px; min-width:120px; }
-    .stat-v { font-size:28px; font-weight:700; color:#60a5fa; }
-    .stat-l { font-size:11px; color:#64748b; margin-top:4px; }
-    .event { background:#161b2e; border:1px solid rgba(239,68,68,0.2); border-radius:12px; padding:18px; margin-bottom:14px; }
-    .ev-h { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-    .ev-badge { background:#ef4444; color:white; font-size:11px; font-weight:700; padding:3px 10px; border-radius:99px; }
-    .ev-time { font-size:12px; color:#64748b; font-family:monospace; }
-    .ev-scores { display:flex; gap:20px; margin-bottom:10px; }
-    .ev-s { font-size:13px; font-family:monospace; }
-    .ev-s span { color:#f59e0b; font-weight:600; }
-    .ev-summary { font-size:14px; color:#94a3b8; line-height:1.6; border-left:3px solid #3b82f6; padding-left:12px; }
-    .no-events { text-align:center; padding:60px; color:#475569; }
-    footer { text-align:center; margin-top:48px; color:#475569; font-size:12px; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: #ffffff;
+      color: #0f172a;
+      margin: 0;
+      padding: 32px 40px;
+      line-height: 1.5;
+    }
+    .header {
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+    }
+    h1 { font-size: 20px; font-weight: 700; margin: 0 0 4px 0; }
+    .sub { color: #64748b; font-size: 12px; margin: 0; }
+    .btn-print {
+      padding: 6px 14px;
+      background: #0f172a;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .stat {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px 16px;
+    }
+    .stat-l { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+    .stat-v { font-size: 22px; font-weight: 700; color: #0f172a; font-family: monospace; }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #0f172a;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .event {
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #dc2626;
+      border-radius: 6px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      background: #ffffff;
+    }
+    .ev-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .ev-badge {
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      color: #dc2626;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .ev-time { font-size: 12px; color: #64748b; font-family: monospace; }
+    .ev-scores {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+    .ev-scores strong { color: #0f172a; }
+    .ev-summary {
+      font-size: 13px;
+      color: #334155;
+      background: #f8fafc;
+      padding: 10px 12px;
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+    .no-events {
+      padding: 40px;
+      text-align: center;
+      color: #64748b;
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 6px;
+    }
+    footer {
+      border-top: 1px solid #e2e8f0;
+      margin-top: 40px;
+      padding-top: 16px;
+      font-size: 11px;
+      color: #94a3b8;
+      display: flex;
+      justify-content: space-between;
+    }
+    @media print {
+      .btn-print { display: none; }
+      body { padding: 0; }
+    }
   </style>
 </head>
 <body>
-  <h1>🌡️ ThermalGuard-VAD — Anomali Tespit Raporu</h1>
-  <p class="sub">Oluşturulma: {{ generated_at }}</p>
+  <div class="header">
+    <div>
+      <h1>ThermalGuard-VAD — Anomali Tespit Raporu</h1>
+      <p class="sub">Rapor Tarihi: {{ generated_at }} &bull; SAYZEK Değerlendirme Dokümanı</p>
+    </div>
+    <button class="btn-print" onclick="window.print()">Yazdır / PDF Kaydet</button>
+  </div>
 
   <div class="stats">
-    <div class="stat"><div class="stat-v">{{ total_frames }}</div><div class="stat-l">İşlenen Kare</div></div>
-    <div class="stat"><div class="stat-v">{{ event_count }}</div><div class="stat-l">Anomali Olayı</div></div>
-    <div class="stat"><div class="stat-v" style="color:#ef4444">{{ anomaly_frames }}</div><div class="stat-l">Anomali Karesi</div></div>
-    <div class="stat"><div class="stat-v">{{ avg_fps }}</div><div class="stat-l">Ort. FPS</div></div>
+    <div class="stat"><div class="stat-l">İşlenen Kare</div><div class="stat-v">{{ total_frames }}</div></div>
+    <div class="stat"><div class="stat-l">Anomali Olayı</div><div class="stat-v">{{ event_count }}</div></div>
+    <div class="stat"><div class="stat-l">Anomali Karesi</div><div class="stat-v" style="color:#dc2626">{{ anomaly_frames }}</div></div>
+    <div class="stat"><div class="stat-l">Ortalama Hız</div><div class="stat-v">{{ avg_fps }} FPS</div></div>
   </div>
+
+  <div class="section-title">Tespit Edilen Olaylar</div>
 
   {% if events %}
     {% for ev in events %}
@@ -1039,19 +1179,22 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
         <span class="ev-time">{{ ev.start_time }}</span>
       </div>
       <div class="ev-scores">
-        <div class="ev-s">Kare: <span>{{ ev.start_frame }} – {{ ev.end_frame }}</span></div>
-        <div class="ev-s">Süre: <span>{{ ev.duration_frames }} kare</span></div>
-        <div class="ev-s">Zirve Skor: <span>{{ "%.4f"|format(ev.peak_score) }}</span></div>
-        <div class="ev-s">Tür: <span>{{ ev.anomaly_type }}</span></div>
+        <div>Kare Aralığı: <strong>{{ ev.start_frame }} &ndash; {{ ev.end_frame }}</strong></div>
+        <div>Süre: <strong>{{ ev.duration_frames }} kare</strong></div>
+        <div>Zirve Skor: <strong>{{ "%.4f"|format(ev.peak_score) }}</strong></div>
+        <div>Tür: <strong>{{ ev.anomaly_type }}</strong></div>
       </div>
-      <div class="ev-summary">{{ ev.llm_summary or "(LLM özeti henüz oluşturulmadı)" }}</div>
+      <div class="ev-summary">{{ ev.llm_summary or "(LLM özeti oluşturulmadı)" }}</div>
     </div>
     {% endfor %}
   {% else %}
-    <div class="no-events">📡 Henüz kayıtlı anomali olayı bulunmuyor.</div>
+    <div class="no-events">Henüz kayıtlı anomali olayı bulunmuyor.</div>
   {% endif %}
 
-  <footer>ThermalGuard-VAD &nbsp;|&nbsp; STAE + ConvLSTM Anomali Tespit Motoru</footer>
+  <footer>
+    <span>ThermalGuard-VAD &bull; Kızılötesi Video Anomali Tespit Sistemi</span>
+    <span>Spatio-Temporal Autoencoder + ConvLSTM</span>
+  </footer>
 </body>
 </html>"""
 
