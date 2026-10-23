@@ -166,8 +166,8 @@ $$\mathcal{S}_{\text{frame}} = \text{Percentile}_{99.5}\left( (x - \hat{x})^2 \r
 Combined with a causal Exponential Moving Average (EMA, $\alpha=0.6$) across consecutive frames, this eliminates transient single-frame sensor noise while maintaining immediate sensitivity to perimeter breaches.
 
 ### Dual-Panel Tactical HUD Visualization (`demo.gif`)
-* **Upper Panel:** Live scrolling graph rendering anomaly score vs. frame index. Displays a horizontal red dashed threshold line (`Threshold = 0.11`), green/red status badges, and hardware latency telemetrics.
-* **Lower Panel:** Split display showing preprocessed LWIR input alongside the spatial error heatmap (blended via OpenCV `COLORMAP_JET` / `COLORMAP_INFERNO`), painting anomalous perimeter breaches in bright red.
+* **Upper Panel:** Live scrolling graph rendering anomaly score vs. frame index. Displays a horizontal red dashed threshold line (`Threshold = 0.20`), green/red status badges, and hardware latency telemetrics.
+* **Lower Panel:** Split display showing preprocessed LWIR input alongside the spatial error heatmap (blended via OpenCV `COLORMAP_INFERNO`), painting anomalous perimeter breaches in radiant amber/yellow with tactical tracking box.
 
 ---
 
@@ -316,8 +316,8 @@ Ham Termal Kare (8/16-bit)
 
 * **Top-K / 99.5 Persentil Havuzlama:** Sızan bir insan karenin yalnızca %1-%3'ünü kaplar. Basit ortalama MSE alınırsa normal arka plan anomaliyi boğar. Bu yüzden piksellerin en yüksek hatalı %0.5'lik kısmının persentili alınır.
 * **Taktik HUD Paneli (`demo.gif`):**
-  * Üst panelde gerçek zamanlı akan Anomali Skoru grafiği ve kırmızı alarm eşik çizgisi (`Threshold = 0.11`).
-  * Alt panelde termal akış üzerinde anomali bölgesini kırmızı/JET skalasıyla boyayan hata ısı haritası.
+  * Üst panelde gerçek zamanlı akan Anomali Skoru grafiği ve kırmızı alarm eşik çizgisi (`Threshold = 0.20`).
+  * Alt panelde termal akış üzerinde anomali bölgesini vurgulayan Inferno sahte renk paleti ve hedef takip kutusu.
 
 ---
 

@@ -63,7 +63,7 @@ class AppState:
         self.fps: float = 0.0
         self.status: str = "idle"                   # 'idle' | 'running' | 'done' | 'error'
         self.score_history: List[dict] = []          # [{frame, score, is_anomaly}]
-        self.threshold: float = 0.11
+        self.threshold: float = 0.20
         self.error_msg: str = ""
 
     def update_frame(self, frame_bgr: np.ndarray, result):
@@ -137,10 +137,12 @@ def run_demo_thread(llm_backend: str = "rule"):
         prep_cfg = ThermalPreprocessConfig()
         preprocessor = ThermalPreprocessor(prep_cfg)
 
+        has_weights = os.path.isfile("weights/stae_thermal_best.pt")
         scorer = AnomalyScorer(AnomalyScoreConfig(percentile=99.2, temporal_smoothing=0.6))
         engine = StreamingInferenceEngine(
             model=model, preprocessor=preprocessor, scorer=scorer,
             clip_len=8, threshold=state.threshold, device=device_str,
+            has_weights=has_weights,
         )
 
         visualizer = DashboardVisualizer(
@@ -217,12 +219,12 @@ def _torch_cuda_available() -> bool:
 #  HTML Şablonları
 # =========================================================================== #
 DASHBOARD_HTML = """<!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="ThermalGuard-VAD — Kızılötesi Video Anomali Tespit Sistemi">
-  <title>ThermalGuard-VAD | Termal Anomali İzleme</title>
+  <meta name="description" content="ThermalGuard-VAD — Infrared Video Anomaly Detection System">
+  <title>ThermalGuard-VAD | Thermal Anomaly Monitoring</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -662,56 +664,56 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div class="brand">
     <span class="brand-title">ThermalGuard</span>
     <span class="brand-badge">VAD</span>
-    <span class="brand-sub">Kızılötesi Video Anomali Tespit Sistemi</span>
+    <span class="brand-sub">Infrared Video Anomaly Detection System</span>
   </div>
   <div class="header-controls">
     <span id="status-badge" class="status-badge idle">
       <span class="status-dot"></span>
-      <span id="status-text">Hazır</span>
+      <span id="status-text">Ready</span>
     </span>
-    <select id="llm-select" title="LLM Rapor Özeti Modeli">
-      <option value="rule">Kural Tabanlı (Çevrimdışı)</option>
-      <option value="ollama">Ollama (Lokal LLM)</option>
+    <select id="llm-select" title="LLM Incident Summary Model">
+      <option value="rule">Rule-Based (Offline)</option>
+      <option value="ollama">Ollama (Local LLM)</option>
       <option value="openai">OpenAI GPT</option>
       <option value="google">Google Gemini</option>
     </select>
-    <button id="start-btn" class="btn btn-primary" onclick="startDemo()">Demo Başlat</button>
-    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">Durdur</button>
-    <a href="/report" target="_blank" class="btn btn-secondary">Rapor</a>
-    <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Açık/Koyu Tema">🌙</button>
+    <button id="start-btn" class="btn btn-primary" onclick="startDemo()">Start Demo</button>
+    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">Stop</button>
+    <a href="/report" target="_blank" class="btn btn-secondary">Report</a>
+    <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Light/Dark Theme">🌙</button>
   </div>
 </header>
 
 <main>
-  <!-- SOL KOLON -->
+  <!-- LEFT COLUMN -->
   <div class="column-left">
 
-    <!-- Video Akışı -->
+    <!-- Live Video Stream -->
     <div class="card" id="stream-card">
       <div class="card-header">
-        <span class="card-title">Canlı Termal Akış</span>
+        <span class="card-title">Live Thermal Stream</span>
         <span id="fps-badge" class="card-subtitle">0.0 FPS</span>
       </div>
       <div class="stream-container">
         <div id="stream-placeholder" class="stream-placeholder">
-          <p>Demo başlatıldığında termal video akışı burada gösterilecektir.</p>
+          <p>Thermal video stream will appear here when the demo starts.</p>
         </div>
-        <img id="stream-img" src="" alt="Termal Akış" style="display:none">
+        <img id="stream-img" src="" alt="Thermal Stream" style="display:none">
       </div>
     </div>
 
-    <!-- Skor Grafiği -->
+    <!-- Anomaly Score Graph -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Anomali Skoru Akışı</span>
-        <span class="card-subtitle">Son 300 kare</span>
+        <span class="card-title">Anomaly Score Stream</span>
+        <span class="card-subtitle">Last 300 frames</span>
       </div>
       <div class="card-body">
         <canvas id="score-canvas"></canvas>
         <div class="score-meter">
           <div class="score-meter-header">
-            <span>Anlık Skor: <span id="score-label" class="score-value">0.00000</span></span>
-            <span>Eşik: 0.20000</span>
+            <span>Current Score: <span id="score-label" class="score-value">0.00000</span></span>
+            <span>Threshold: 0.20000</span>
           </div>
           <div class="score-bar">
             <div id="score-bar-fill" class="score-bar-fill"></div>
@@ -722,49 +724,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   </div>
 
-  <!-- SAĞ KOLON -->
+  <!-- RIGHT COLUMN -->
   <div class="column-right">
 
-    <!-- Sistem Metrikleri -->
+    <!-- System Metrics -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Sistem Metrikleri</span>
+        <span class="card-title">System Metrics</span>
       </div>
       <div class="card-body">
         <div class="metrics-grid">
           <div class="metric-box">
-            <div class="metric-label">İşlenen Kare</div>
+            <div class="metric-label">Processed Frames</div>
             <div class="metric-number" id="m-frames">0</div>
-            <div class="metric-unit">kare</div>
+            <div class="metric-unit">frames</div>
           </div>
           <div class="metric-box">
-            <div class="metric-label">Anomali Karesi</div>
+            <div class="metric-label">Anomaly Frames</div>
             <div class="metric-number" id="m-anomalies">0</div>
-            <div class="metric-unit">tespit</div>
+            <div class="metric-unit">detected</div>
           </div>
           <div class="metric-box">
-            <div class="metric-label">Olay Sayısı</div>
+            <div class="metric-label">Event Count</div>
             <div class="metric-number" id="m-events">0</div>
-            <div class="metric-unit">alarm</div>
+            <div class="metric-unit">alerts</div>
           </div>
           <div class="metric-box">
-            <div class="metric-label">İşleme Hızı</div>
+            <div class="metric-label">Processing Speed</div>
             <div class="metric-number" id="m-fps">0.0</div>
-            <div class="metric-unit">kare/sn</div>
+            <div class="metric-unit">fps</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Olay Günlüğü -->
+    <!-- Event Log -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">Olay Günlüğü</span>
-        <span id="event-count-badge" class="card-subtitle">0 olay</span>
+        <span class="card-title">Incident Log</span>
+        <span id="event-count-badge" class="card-subtitle">0 events</span>
       </div>
       <div class="card-body" style="padding: 12px;">
         <div class="alert-feed" id="alert-feed">
-          <div class="no-events">Henüz anomali olayı kaydedilmedi.</div>
+          <div class="no-events">No anomaly events recorded yet.</div>
         </div>
       </div>
     </div>
@@ -773,7 +775,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </main>
 
 <footer>
-  <span>ThermalGuard-VAD &bull; SAYZEK Proje Başvurusu</span>
+  <span>ThermalGuard-VAD &bull; Perimeter Anomaly Detection System</span>
   <span>Spatio-Temporal Autoencoder + ConvLSTM</span>
 </footer>
 
@@ -815,7 +817,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           startStream();
           startPolling();
         } else {
-          alert('Hata: ' + (d.error || 'Bilinmeyen'));
+          alert('Error: ' + (d.error || 'Unknown'));
         }
       });
   }
@@ -864,7 +866,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').style.display = 'none';
       }
-    } catch (e) { /* ağ gecikmesi */ }
+    } catch (e) { /* network delay */ }
   }
 
   function updateStatus(s) {
@@ -884,12 +886,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     const badge = document.getElementById('status-badge');
     const statusMap = {
-      idle: ['idle', 'Hazır'],
-      running: ['running', 'Çalışıyor'],
-      done: ['done', 'Tamamlandı'],
-      error: ['error', 'Hata'],
+      idle: ['idle', 'Ready'],
+      running: ['running', 'Running'],
+      done: ['done', 'Completed'],
+      error: ['error', 'Error'],
     };
-    const [cls, txt] = statusMap[s.status] || ['idle', 'Hazır'];
+    const [cls, txt] = statusMap[s.status] || ['idle', 'Ready'];
     badge.className = 'status-badge ' + cls;
     document.getElementById('status-text').textContent = txt;
 
@@ -900,7 +902,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
 
   function updateEvents(events) {
-    document.getElementById('event-count-badge').textContent = events.length + ' olay';
+    document.getElementById('event-count-badge').textContent = events.length + ' events';
     document.getElementById('m-events').textContent = events.length;
     if (events.length === knownEvents) return;
 
@@ -916,15 +918,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const startTime = ev.start_time ? ev.start_time.replace('T', ' ').substring(0, 19) : '-';
       card.innerHTML = `
         <div class="alert-header">
-          <span class="alert-badge">ALARM #${ev.event_id}</span>
+          <span class="alert-badge">ALERT #${ev.event_id}</span>
           <span class="alert-time">${startTime}</span>
         </div>
         <div class="alert-meta">
-          <span>Zirve Skor: <strong>${ev.peak_score.toFixed(4)}</strong></span>
-          <span>Süre: <strong>${ev.duration_frames} kare</strong></span>
-          <span>Tür: <strong>${ev.anomaly_type || 'Bilinmiyor'}</strong></span>
+          <span>Peak Score: <strong>${ev.peak_score.toFixed(4)}</strong></span>
+          <span>Duration: <strong>${ev.duration_frames} frames</strong></span>
+          <span>Type: <strong>${ev.anomaly_type || 'Unknown'}</strong></span>
         </div>
-        <div class="alert-summary">${ev.llm_summary || '(LLM özeti oluşturuluyor...)'}</div>
+        <div class="alert-summary">${ev.llm_summary || '(Generating LLM summary...)'}</div>
       `;
       feed.prepend(card);
     }
@@ -953,7 +955,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       ctx.fillStyle = textColor;
       ctx.font = '12px -apple-system, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('Veri bekleniyor...', W / 2, H / 2);
+      ctx.fillText('Waiting for data...', W / 2, H / 2);
       return;
     }
 
@@ -964,7 +966,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     const scores = scoreHistory.map(s => s.score);
     const maxY = Math.max(threshold * 1.8, ...scores, 0.4);
 
-    // Kılavuz çizgileri
+    // Grid lines
     ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -976,7 +978,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
     ctx.stroke();
 
-    // Y ekseni etiketleri
+    // Y-axis labels
     ctx.fillStyle = textColor;
     ctx.font = '10px monospace';
     ctx.textAlign = 'right';
@@ -986,7 +988,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       ctx.fillText(yVal.toFixed(2), pad.l - 6, yPos + 3);
     }
 
-    // Eşik çizgisi
+    // Threshold line
     const ty = pad.t + ph * (1 - threshold / maxY);
     ctx.strokeStyle = '#dc2626';
     ctx.lineWidth = 1;
@@ -1000,9 +1002,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     ctx.fillStyle = '#dc2626';
     ctx.font = '10px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('Eşik (' + threshold.toFixed(2) + ')', pad.l + 6, ty - 4);
+    ctx.fillText('Threshold (' + threshold.toFixed(2) + ')', pad.l + 6, ty - 4);
 
-    // Skor çizgisi
+    // Score line
     ctx.lineWidth = 1.8;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
@@ -1021,7 +1023,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       ctx.stroke();
     }
 
-    // Son nokta
+    // Current point
     const last = scoreHistory[scoreHistory.length - 1];
     const lx = pad.l + pw;
     const ly = pad.t + ph * (1 - Math.min(last.score, maxY) / maxY);
@@ -1036,10 +1038,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 
 REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ThermalGuard-VAD | Anomali Raporu</title>
+  <title>ThermalGuard-VAD | Anomaly Report</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -1156,43 +1158,43 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
   <div class="header">
     <div>
-      <h1>ThermalGuard-VAD — Anomali Tespit Raporu</h1>
-      <p class="sub">Rapor Tarihi: {{ generated_at }} &bull; SAYZEK Değerlendirme Dokümanı</p>
+      <h1>ThermalGuard-VAD — Anomaly Detection Report</h1>
+      <p class="sub">Generated: {{ generated_at }} &bull; Perimeter Surveillance AI Evaluation Document</p>
     </div>
-    <button class="btn-print" onclick="window.print()">Yazdır / PDF Kaydet</button>
+    <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="stat-l">İşlenen Kare</div><div class="stat-v">{{ total_frames }}</div></div>
-    <div class="stat"><div class="stat-l">Anomali Olayı</div><div class="stat-v">{{ event_count }}</div></div>
-    <div class="stat"><div class="stat-l">Anomali Karesi</div><div class="stat-v" style="color:#dc2626">{{ anomaly_frames }}</div></div>
-    <div class="stat"><div class="stat-l">Ortalama Hız</div><div class="stat-v">{{ avg_fps }} FPS</div></div>
+    <div class="stat"><div class="stat-l">Processed Frames</div><div class="stat-v">{{ total_frames }}</div></div>
+    <div class="stat"><div class="stat-l">Anomaly Events</div><div class="stat-v">{{ event_count }}</div></div>
+    <div class="stat"><div class="stat-l">Anomaly Frames</div><div class="stat-v" style="color:#dc2626">{{ anomaly_frames }}</div></div>
+    <div class="stat"><div class="stat-l">Average Speed</div><div class="stat-v">{{ avg_fps }} FPS</div></div>
   </div>
 
-  <div class="section-title">Tespit Edilen Olaylar</div>
+  <div class="section-title">Detected Incidents</div>
 
   {% if events %}
     {% for ev in events %}
     <div class="event">
       <div class="ev-h">
-        <span class="ev-badge">ALARM #{{ ev.event_id }}</span>
+        <span class="ev-badge">ALERT #{{ ev.event_id }}</span>
         <span class="ev-time">{{ ev.start_time }}</span>
       </div>
       <div class="ev-scores">
-        <div>Kare Aralığı: <strong>{{ ev.start_frame }} &ndash; {{ ev.end_frame }}</strong></div>
-        <div>Süre: <strong>{{ ev.duration_frames }} kare</strong></div>
-        <div>Zirve Skor: <strong>{{ "%.4f"|format(ev.peak_score) }}</strong></div>
-        <div>Tür: <strong>{{ ev.anomaly_type }}</strong></div>
+        <div>Frame Range: <strong>{{ ev.start_frame }} &ndash; {{ ev.end_frame }}</strong></div>
+        <div>Duration: <strong>{{ ev.duration_frames }} frames</strong></div>
+        <div>Peak Score: <strong>{{ "%.4f"|format(ev.peak_score) }}</strong></div>
+        <div>Type: <strong>{{ ev.anomaly_type }}</strong></div>
       </div>
-      <div class="ev-summary">{{ ev.llm_summary or "(LLM özeti oluşturulmadı)" }}</div>
+      <div class="ev-summary">{{ ev.llm_summary or "(No LLM summary generated)" }}</div>
     </div>
     {% endfor %}
   {% else %}
-    <div class="no-events">Henüz kayıtlı anomali olayı bulunmuyor.</div>
+    <div class="no-events">No recorded anomaly events found.</div>
   {% endif %}
 
   <footer>
-    <span>ThermalGuard-VAD &bull; Kızılötesi Video Anomali Tespit Sistemi</span>
+    <span>ThermalGuard-VAD &bull; Infrared Video Anomaly Detection System</span>
     <span>Spatio-Temporal Autoencoder + ConvLSTM</span>
   </footer>
 </body>
@@ -1209,10 +1211,10 @@ def index():
 
 @app.route("/stream")
 def stream():
-    """MJPEG video akışı."""
+    """MJPEG video stream."""
     def generate():
         blank = np.full((380, 640, 3), 22, dtype=np.uint8)
-        cv2.putText(blank, "Akis Bekleniyor...", (200, 190),
+        cv2.putText(blank, "Waiting for stream...", (200, 190),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 90, 110), 1)
         _, blank_buf = cv2.imencode(".jpg", blank)
         blank_bytes = blank_buf.tobytes()
@@ -1233,7 +1235,7 @@ def stream():
 @app.route("/api/run_demo", methods=["POST"])
 def run_demo():
     if state.is_running:
-        return jsonify({"ok": False, "error": "Demo zaten çalışıyor"})
+        return jsonify({"ok": False, "error": "Demo is already running"})
     from flask import request
     llm = request.args.get("llm", "rule")
     state.is_running = True

@@ -52,33 +52,33 @@ from thermalguard.reporting.llm_summary import LLMSummarizer
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--weights", default="weights/stae_thermal_best.pt", help="Eğitilmiş model ağırlıkları")
-    p.add_argument("--source", default="", help="Video dosyası, kamera indeksi veya termal klasör yolu")
-    p.add_argument("--synthetic", action="store_true", help="Gömülü termal sınır senaryosunu çalıştır")
-    p.add_argument("--threshold", type=float, default=0.11, help="Anomali alarm eşiği")
+    p.add_argument("--weights", default="weights/stae_thermal_best.pt", help="Path to trained model weights")
+    p.add_argument("--source", default="", help="Video file, camera index, or thermal image folder path")
+    p.add_argument("--synthetic", action="store_true", help="Run embedded thermal perimeter security simulation")
+    p.add_argument("--threshold", type=float, default=0.20, help="Anomaly alert score threshold")
     p.add_argument("--clip-len", type=int, default=8)
-    p.add_argument("--max-frames", type=int, default=180, help="İşlenecek maksimum kare sayısı")
-    p.add_argument("--gif", default="demo.gif", help="Çıktı GIF yolu")
-    p.add_argument("--mp4", default="", help="Çıktı MP4 video yolu (opsiyonel)")
-    p.add_argument("--device", default="", help="cuda | cpu | (boş = otomatik)")
-    p.add_argument("--no-clahe", action="store_true", help="Ablasyon: CLAHE kapat")
-    # Yeni: Raporlama ve LLM
-    p.add_argument("--log-dir", default="logs", help="Olay kayıt klasörü (JSON + CSV)")
+    p.add_argument("--max-frames", type=int, default=180, help="Maximum number of frames to process")
+    p.add_argument("--gif", default="demo.gif", help="Output GIF path")
+    p.add_argument("--mp4", default="", help="Output MP4 video path (optional)")
+    p.add_argument("--device", default="", help="cuda | cpu | (empty = auto)")
+    p.add_argument("--no-clahe", action="store_true", help="Ablation: Disable CLAHE")
+    p.add_argument("--log-dir", default="logs", help="Event log directory (JSON + CSV)")
     p.add_argument("--llm", default="rule",
                    choices=["rule", "ollama", "openai", "google"],
-                   help="LLM özet arka ucu: rule (offline) | ollama | openai | google")
-    p.add_argument("--llm-model", default="", help="LLM model adı (boş → arka uca göre varsayılan)")
+                   help="LLM incident summary backend: rule (offline) | ollama | openai | google")
+    p.add_argument("--llm-model", default="", help="LLM model name (empty = backend default)")
     return p.parse_args()
 
 
-def load_or_init_model(weights_path: str, device: torch.device) -> Tuple[STAE, dict]:
+def load_or_init_model(weights_path: str, device: torch.device) -> Tuple[STAE, dict, bool]:
     default_cfg = {
         "widths": (16, 32, 64, 96),
         "latent": 64,
         "lstm_hidden": (64, 64),
         "objective": "reconstruct",
     }
-    if os.path.isfile(weights_path):
+    has_weights = os.path.isfile(weights_path)
+    if has_weights:
         print(f"[✓] Model ağırlıkları yükleniyor: {weights_path}")
         ckpt = torch.load(weights_path, map_location=device, weights_only=False)
         model_cfg = ckpt.get("model_cfg", default_cfg)
@@ -92,7 +92,7 @@ def load_or_init_model(weights_path: str, device: torch.device) -> Tuple[STAE, d
 
     model.to(device)
     model.eval()
-    return model, prep_cfg_dict
+    return model, prep_cfg_dict, has_weights
 
 
 def main():
@@ -103,7 +103,7 @@ def main():
     print(f"[i] Çıkarım Cihazı: {device}")
 
     # 2. Model ve Ön İşleme
-    model, saved_prep = load_or_init_model(args.weights, device)
+    model, saved_prep, has_weights = load_or_init_model(args.weights, device)
 
     prep_cfg = ThermalPreprocessConfig.from_dict(saved_prep) if saved_prep else ThermalPreprocessConfig()
     if args.no_clahe:
@@ -119,6 +119,7 @@ def main():
         clip_len=args.clip_len,
         threshold=args.threshold,
         device=str(device),
+        has_weights=has_weights,
     )
 
     visualizer = DashboardVisualizer(
@@ -143,22 +144,21 @@ def main():
     def _on_event(ev):
         summary = summarizer.summarize_and_attach(ev, logger)
         print(f"\n{'='*60}")
-        print(f"  [ALARM] Olay #{ev.event_id} | Kare: {ev.start_frame}–{ev.end_frame}")
-        print(f"  Zirve Skor: {ev.peak_score:.4f} | Süre: {ev.duration_frames} kare")
-        print(f"  LLM Özeti: {summary}")
+        print(f"  [ALERT] Incident #{ev.event_id} | Frames: {ev.start_frame}–{ev.end_frame}")
+        print(f"  Peak Score: {ev.peak_score:.4f} | Duration: {ev.duration_frames} frames")
+        print(f"  LLM Summary: {summary}")
         print(f"{'='*60}")
 
     logger._callback = _on_event
 
-    # 4. Kare Akışını Başlat
+    # 4. Stream Source
     frames_generator = []
     gt_labels = None
     gt_masks = None
     if args.synthetic or not args.source:
-        print("[i] Gömülü Fiziksel Termal Sınır Güvenliği Simülasyonu başlatılıyor...")
-        print("    Senaryo: Yasak askeri bölgeye tel örgüyü aşarak sızan sıcak insan hedefi (Intrusion).")
+        print("[i] Starting embedded physical thermal perimeter security simulation...")
+        print("    Scenario: Unauthorized human intruder crossing restricted perimeter fence.")
         sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=args.max_frames, seed=42)
-        # 60. ile 135. kareler arasında sıcak sızma anomalisi
         anomalies = [
             AnomalyEvent(
                 start_frame=60,
@@ -174,37 +174,35 @@ def main():
         frames_generator = list(enumerate(raw_frames))
         fps = 20.0
     else:
-        print(f"[i] Kare Kaynağı: {args.source}")
+        print(f"[i] Frame Source: {args.source}")
         source = FrameSource(args.source, max_frames=args.max_frames)
         frames_generator = list(source)
         fps = getattr(source, "fps", 20.0)
 
-    print(f"[✓] İşlenecek Toplam Kare: {len(frames_generator)} (Hedef FPS: {fps:.1f})")
+    print(f"[✓] Total Frames to Process: {len(frames_generator)} (Target FPS: {fps:.1f})")
 
     rendered_frames = []
     anomaly_counts = 0
     latencies = []
 
     print("\n" + "=" * 65)
-    print("  ThermalGuard-VAD Gerçek Zamanlı Çıkarım Akışı")
+    print("  ThermalGuard-VAD Real-Time Inference Stream")
     print("=" * 65)
 
     gt_labels_arr = gt_labels if args.synthetic or not args.source else None
 
-    for i, raw_frame in tqdm(frames_generator, desc="Çıkarım Yapılıyor", unit="kare"):
+    for i, raw_frame in tqdm(frames_generator, desc="Processing Frames", unit="frame"):
         res = engine.step(raw_frame)
         latencies.append(res.latency_ms)
 
         if res.is_anomaly:
             anomaly_counts += 1
 
-        # Anomali türünü GT etiketinden belirle (simülasyon)
         anom_type = "unknown"
         if args.synthetic and gt_labels_arr is not None and i < len(gt_labels_arr):
             if gt_labels_arr[i] == 1:
                 anom_type = "intruder"
 
-        # Olay kaydını güncelle
         logger.update(
             frame_idx=res.frame_idx,
             is_anomaly=res.is_anomaly,
@@ -219,36 +217,35 @@ def main():
     avg_fps = 1000.0 / max(avg_lat, 1e-4)
 
     print("\n" + "=" * 65)
-    print("  PERFORMANS VE ÇIKARIM TELEMETRİ RAPORU")
+    print("  PERFORMANCE AND INFERENCE TELEMETRY REPORT")
     print("=" * 65)
-    print(f"  * Toplam İşlenen Kare      : {len(rendered_frames)}")
-    print(f"  * Tespit Edilen İhlal Karesi: {anomaly_counts} (Toplamın %{100.0 * anomaly_counts / max(1, len(rendered_frames)):.1f}'i)")
-    print(f"  * Ortalama Gecikme (Latency): {avg_lat:.2f} ms / kare")
-    print(f"  * Çıkarım Hızı (Throughput) : {avg_fps:.1f} FPS (Kenar Cihaz Gerçek Zamanlı Kriteri: >20 FPS [GEÇTİ])")
+    print(f"  * Total Processed Frames     : {len(rendered_frames)}")
+    print(f"  * Detected Anomaly Frames    : {anomaly_counts} ({100.0 * anomaly_counts / max(1, len(rendered_frames)):.1f}% of sequence)")
+    print(f"  * Mean Latency               : {avg_lat:.2f} ms / frame")
+    print(f"  * Inference Throughput       : {avg_fps:.1f} FPS (Target >20 FPS: {'PASSED' if avg_fps >= 20 else 'CPU MODE'})")
     print("=" * 65)
 
-    # Olay kaydını kapat ve özet yaz
+    # Finalize event logger
     all_events = logger.finalize()
-    print(f"\n[✓] Kayıtlı Anomali Olayları    : {len(all_events)}")
-    print(f"[✓] Olay Kayıt (JSON)           : {logger.json_path}")
-    print(f"[✓] Olay Kayıt (CSV)            : {logger.csv_path}")
+    print(f"\n[✓] Recorded Anomaly Events   : {len(all_events)}")
+    print(f"[✓] Event Log (JSON)          : {logger.json_path}")
+    print(f"[✓] Event Log (CSV)           : {logger.csv_path}")
     if all_events:
-        print("\n  Olay Özetleri:")
+        print("\n  Event Summaries:")
         for ev in all_events:
-            print(f"  #{ev.event_id}: Kare {ev.start_frame}-{ev.end_frame} | Skor: {ev.peak_score:.4f}")
+            print(f"  #{ev.event_id}: Frames {ev.start_frame}-{ev.end_frame} | Peak Score: {ev.peak_score:.4f}")
             if ev.llm_summary:
                 print(f"      → {ev.llm_summary}")
 
-    # 5. Görsel Çıktıları Kaydet
+    # Save visual outputs
     if args.gif and rendered_frames:
-        print(f"\n[+] demo.gif oluşturuluyor ({len(rendered_frames)} kare, 15 FPS)...")
-        # GIF boyutunu optimize etmek için her 2 karede bir örnekleme yapılabilir veya doğrudan kaydedilebilir
-        save_demo_gif(rendered_frames[::1], output_path=args.gif, fps=15.0)
+        print(f"\n[+] Generating {args.gif} ({len(rendered_frames)} frames, 15 FPS)...")
+        save_demo_gif(rendered_frames, output_path=args.gif, fps=15.0)
 
     if args.mp4 and rendered_frames:
         save_demo_video(rendered_frames, output_path=args.mp4, fps=fps)
 
-    print("\n[✓] Çıkarım süreci başarıyla tamamlandı!")
+    print("\n[✓] Inference pipeline completed successfully!")
 
 
 if __name__ == "__main__":

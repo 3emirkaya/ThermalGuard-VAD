@@ -34,73 +34,73 @@ from .logger import AnomalyEvent
 
 
 # --------------------------------------------------------------------------- #
-#  Prompt Şablonu
+#  Prompt Template
 # --------------------------------------------------------------------------- #
-SYSTEM_PROMPT_TR = textwrap.dedent("""\
-    Sen bir sınır güvenliği kızılötesi kamera sistemi analiz asistanısın.
-    Sana verilen termal anomali olay verisini analiz et ve aşağıdaki kurallara göre
-    kısa, okunabilir Türkçe bir güvenlik uyarısı raporu yaz:
+SYSTEM_PROMPT_EN = textwrap.dedent("""\
+    You are an infrared perimeter security surveillance analyst assistant.
+    Analyze the provided thermal anomaly event data and generate a concise,
+    readable security alert summary following these guidelines:
 
-    - İlk cümle: Olayı kısaca özetle (ne tespit edildi, ne zaman, kaç kare sürdü).
-    - İkinci cümle: Risk seviyesini değerlendir (düşük / orta / yüksek).
-    - Üçüncü cümle: Öneri (gözlemci uyarısı, kayıt başlatma, doğrulama vb.).
+    - First sentence: Briefly summarize the event (what was detected, duration, frame range).
+    - Second sentence: Assess the threat / risk level (LOW / MEDIUM / HIGH).
+    - Third sentence: Recommend an operational action (dispatch patrol, initiate recording, verify).
 
-    Maksimum 3 cümle, toplam 80 kelime. Teknik jargondan kaçın.
+    Keep it under 3 sentences and 80 words. Avoid overly academic jargon.
 """)
 
 
 def _build_user_prompt(event: AnomalyEvent, fps: float = 20.0) -> str:
     duration_s = event.duration_frames / max(fps, 1.0)
     anomaly_name_map = {
-        "intruder": "sıcak insan hedefi (olası sızma)",
-        "vehicle": "hızlı araç ısı izi",
-        "heat_source": "statik ısı kaynağı / bırakılan nesne",
-        "unknown": "tanımlanamayan anomali",
+        "intruder": "warm human silhouette (potential infiltration)",
+        "vehicle": "rapid vehicle thermal heat signature",
+        "heat_source": "static thermal source / unattended suspicious object",
+        "unknown": "unidentified thermal anomaly",
     }
     anom_name = anomaly_name_map.get(event.anomaly_type, event.anomaly_type)
 
     return textwrap.dedent(f"""\
-        Olay Verisi:
-        - Tespit Türü      : {anom_name}
-        - Kare Aralığı     : {event.start_frame} – {event.end_frame}
-        - Süre             : {event.duration_frames} kare ({duration_s:.1f} sn)
-        - Zirve Anomali Skoru: {event.peak_score:.4f}
-        - Ortalama Skor    : {event.mean_score:.4f}
-        - Başlangıç Zamanı : {event.start_time}
+        Event Data:
+        - Detection Type   : {anom_name}
+        - Frame Range      : {event.start_frame} – {event.end_frame}
+        - Duration         : {event.duration_frames} frames ({duration_s:.1f} s)
+        - Peak Anomaly Score: {event.peak_score:.4f}
+        - Mean Score       : {event.mean_score:.4f}
+        - Start Timestamp  : {event.start_time}
 
-        Yukarıdaki veriye dayanarak kısa güvenlik uyarısı raporu yaz.
+        Write a concise, operational security alert report based on the data above.
     """)
 
 
 # --------------------------------------------------------------------------- #
-#  Kural Tabanlı (Rule-Based) Şablon Üretici
+#  Rule-Based Summary Generator (Offline / Fallback)
 # --------------------------------------------------------------------------- #
 def _rule_based_summary(event: AnomalyEvent, fps: float = 20.0) -> str:
-    """API gerektirmeyen şablon tabanlı Türkçe özet üretici."""
+    """Template-based English summary generator requiring no external API."""
     duration_s = event.duration_frames / max(fps, 1.0)
 
     type_desc = {
-        "intruder": "kızılötesi görüntüde sıcak insan silueti tespit edildi — olası yetkisiz giriş",
-        "vehicle": "sınır hattına hızla yaklaşan araç ısı izi tespit edildi",
-        "heat_source": "statik bölgede aniden beliren şüpheli ısı kaynağı / nesne tespit edildi",
-        "unknown": "termal anomali tespit edildi",
+        "intruder": "warm human silhouette detected in infrared spectrum (potential perimeter intrusion)",
+        "vehicle": "rapid vehicle thermal signature detected approaching boundary",
+        "heat_source": "stationary suspicious thermal signature / abandoned object detected",
+        "unknown": "thermal anomaly detected in surveillance sector",
     }
-    desc = type_desc.get(event.anomaly_type, "termal anomali tespit edildi")
+    desc = type_desc.get(event.anomaly_type, "thermal anomaly detected in surveillance sector")
 
     if event.peak_score >= 0.5:
-        risk = "YÜKSEK"
-        action = "Bölgeye derhal gözlemci sevk edilmesi ve kayıt başlatılması önerilir."
+        risk = "HIGH"
+        action = "Immediate guard patrol dispatch and dedicated recording recommended."
     elif event.peak_score >= 0.25:
-        risk = "ORTA"
-        action = "Bölgenin yakın izlemesi ve bir sonraki kare döngüsünde doğrulama yapılması önerilir."
+        risk = "MEDIUM"
+        action = "Close camera monitoring and multi-frame verification recommended."
     else:
-        risk = "DÜŞÜK"
-        action = "Sistem kaydı incelenmeli; gerekirse saha teyidi yapılabilir."
+        risk = "LOW"
+        action = "Log event for routine shift review; verify if persistence continues."
 
     return (
-        f"Kare {event.start_frame}–{event.end_frame} aralığında ({duration_s:.1f} sn) "
-        f"{desc} (zirve skor: {event.peak_score:.3f}). "
-        f"Risk seviyesi: {risk} — {action}"
+        f"Frames {event.start_frame}–{event.end_frame} ({duration_s:.1f}s): "
+        f"{desc} (peak score: {event.peak_score:.3f}). "
+        f"Risk level: {risk} — {action}"
     )
 
 
@@ -180,7 +180,7 @@ class LLMSummarizer:
 
         payload = json.dumps({
             "model": self.model,
-            "prompt": f"{SYSTEM_PROMPT_TR}\n\n{_build_user_prompt(event, self.fps)}",
+            "prompt": f"{SYSTEM_PROMPT_EN}\n\n{_build_user_prompt(event, self.fps)}",
             "stream": False,
         }).encode("utf-8")
 
@@ -196,18 +196,18 @@ class LLMSummarizer:
 
     # ------------------------------------------------------------------ #
     def _openai(self, event: AnomalyEvent) -> str:
-        """OpenAI API ile özet üretir."""
+        """OpenAI API summary."""
         try:
             import openai
         except ImportError:
-            raise ImportError("openai paketi kurulu değil: pip install openai")
+            raise ImportError("openai package not installed: pip install openai")
 
         key = self.api_key or os.environ.get("OPENAI_API_KEY")
         client = openai.OpenAI(api_key=key)
         resp = client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_TR},
+                {"role": "system", "content": SYSTEM_PROMPT_EN},
                 {"role": "user", "content": _build_user_prompt(event, self.fps)},
             ],
             max_tokens=200,
@@ -217,15 +217,15 @@ class LLMSummarizer:
 
     # ------------------------------------------------------------------ #
     def _google(self, event: AnomalyEvent) -> str:
-        """Google Gemini API ile özet üretir."""
+        """Google Gemini API summary."""
         import urllib.request
 
         key = self.api_key or os.environ.get("GOOGLE_API_KEY")
         if not key:
-            raise ValueError("GOOGLE_API_KEY çevre değişkeni tanımlı değil")
+            raise ValueError("GOOGLE_API_KEY environment variable not set")
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key}"
-        full_prompt = f"{SYSTEM_PROMPT_TR}\n\n{_build_user_prompt(event, self.fps)}"
+        full_prompt = f"{SYSTEM_PROMPT_EN}\n\n{_build_user_prompt(event, self.fps)}"
         payload = json.dumps({
             "contents": [{"parts": [{"text": full_prompt}]}],
             "generationConfig": {"maxOutputTokens": 200},

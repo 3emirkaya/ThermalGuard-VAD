@@ -49,14 +49,17 @@ class StreamingInferenceEngine:
         preprocessor: ThermalPreprocessor,
         scorer: Optional[AnomalyScorer] = None,
         clip_len: int = 8,
-        threshold: float = 0.35,
+        threshold: float = 0.20,
         device: Optional[str] = None,
+        has_weights: bool = True,
     ):
         self.clip_len = clip_len
         self.threshold = threshold
         self.preprocessor = preprocessor
         self.scorer = scorer or AnomalyScorer()
         self.scorer.threshold = threshold
+        self.has_weights = has_weights
+        self.bg_model: Optional[np.ndarray] = None
 
         if device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -76,6 +79,7 @@ class StreamingInferenceEngine:
         self.raw_buffer.clear()
         self.preprocessor.reset()
         self.scorer.reset()
+        self.bg_model = None
         self.frame_count = 0
         self._latencies.clear()
 
@@ -114,8 +118,35 @@ class StreamingInferenceEngine:
 
         # 4. Hata Haritası ve Anomali Skoru
         target_np = prep_frame
-        error_map = self.scorer.compute_error_map(target_np, recon_np)
-        score = self.scorer.compute_frame_score(error_map)
+        if self.has_weights:
+            error_map = self.scorer.compute_error_map(target_np, recon_np)
+            score = self.scorer.compute_frame_score(error_map)
+        else:
+            # Standalone / Uncalibrated Fallback (Physical Baseline Tracker)
+            raw_float = cv2.resize(raw_frame.astype(np.float32), (W, H), interpolation=cv2.INTER_AREA)
+            if self.bg_model is None:
+                self.bg_model = raw_float.copy()
+
+            diff = np.abs(raw_float - self.bg_model)
+            error_map = np.clip(diff / 180.0, 0.0, 1.0)
+
+            # Target focus: evaluate top 0.3% hottest anomaly pixels (target size)
+            k = max(10, int(error_map.size * 0.003))
+            flat = error_map.ravel()
+            top_val = float(np.mean(np.partition(flat, -k)[-k:]))
+            raw_score = float(top_val * 0.85)
+
+            if self.scorer.smoothed_score is None:
+                self.scorer.smoothed_score = raw_score
+            else:
+                self.scorer.smoothed_score = 0.65 * self.scorer.smoothed_score + 0.35 * raw_score
+            score = float(self.scorer.smoothed_score)
+
+            # Slowly update background on static/normal pixels (diff < 25)
+            mask = (diff < 25.0).astype(np.float32)
+            self.bg_model = self.bg_model * (1.0 - 0.03 * mask) + raw_float * (0.03 * mask)
+            recon_np = self.bg_model / 255.0
+
         is_anomaly = bool(score >= self.threshold)
 
         # 5. Görselleştirme Hazırlığı (Heatmap & Overlay)
