@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, Optional
@@ -73,7 +74,9 @@ class FrameSource:
     def __len__(self) -> int:
         if self._files is not None:
             return len(self._files)
-        cap = cv2.VideoCapture(self._cap_arg())
+        if str(self.spec).isdigit():
+            return 0  # Canlı kamera akışı
+        cap = self._open_capture()
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
         n = max(0, (n - self.start)) // max(1, self.stride)
@@ -83,6 +86,12 @@ class FrameSource:
         s = str(self.spec)
         return int(s) if s.isdigit() else s
 
+    def _open_capture(self) -> cv2.VideoCapture:
+        arg = self._cap_arg()
+        if sys.platform == "win32" and isinstance(arg, int):
+            return cv2.VideoCapture(arg, cv2.CAP_DSHOW)
+        return cv2.VideoCapture(arg)
+
     def __iter__(self) -> Iterator[tuple[int, np.ndarray]]:
         """(kare_indeksi, ham_kare) üretir."""
         if self._files is not None:
@@ -91,7 +100,7 @@ class FrameSource:
                     yield i, read_thermal(f)
                 if not self.loop:
                     return
-        cap = cv2.VideoCapture(self._cap_arg())
+        cap = self._open_capture()
         if not cap.isOpened():
             raise IOError(f"kaynak açılamadı: {self.spec}")
         fps = cap.get(cv2.CAP_PROP_FPS)

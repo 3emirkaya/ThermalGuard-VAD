@@ -52,6 +52,10 @@ weights/*.onnx
 data/raw/
 data/kaist/
 data/kaist_survey/
+data/uploads/
+*.mp4
+*.avi
+*.mkv
 
 # Temporary recordings
 scratch/

@@ -28,12 +28,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# Windows cp1252 terminal uyumluluğu
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import cv2
 import numpy as np
 
 # Flask kontrol et, yoksa hata ver
 try:
-    from flask import Flask, Response, jsonify, render_template_string, stream_with_context
+    from flask import Flask, Response, jsonify, render_template_string, stream_with_context, request
 except ImportError:
     print("[!] Flask kurulu değil. Kurmak için: pip install flask")
     sys.exit(1)
@@ -65,6 +73,17 @@ class AppState:
         self.score_history: List[dict] = []          # [{frame, score, is_anomaly}]
         self.threshold: float = 0.20
         self.error_msg: str = ""
+
+    def reset(self):
+        with self._lock:
+            self.latest_frame = None
+            self.events = []
+            self.frame_count = 0
+            self.anomaly_count = 0
+            self.latest_score = 0.0
+            self.fps = 0.0
+            self.score_history = []
+            self.error_msg = ""
 
     def update_frame(self, frame_bgr: np.ndarray, result):
         ok, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
@@ -108,36 +127,57 @@ app = Flask(__name__)
 
 
 # =========================================================================== #
-#  Arka Plan Çalışma Thread'i
+#  Arka Plan Çalışma Thread'i (Kamera / Video / Simülasyon)
 # =========================================================================== #
-def run_demo_thread(llm_backend: str = "rule"):
-    """Synthetic demo'yu arka planda çalıştırır."""
+def run_stream_thread(source_type: str = "synthetic", source_param: str = "", llm_backend: str = "rule", loop: bool = True):
+    """Canlı kamera, video, KAIST sekansı veya sentetik demoyu arka planda çalıştırır."""
     state.status = "running"
     state.frame_count = 0
     state.anomaly_count = 0
     state.events = []
     state.score_history = []
+    state.error_msg = ""
 
     try:
-        # Lazy import: torch sadece demo başladığında yüklenir
+        import torch
         from thermalguard.data.synthetic import AnomalyEvent as SimAnomalyEvent, ThermalPerimeterSimulator
+        from thermalguard.data.sources import FrameSource
         from thermalguard.engine.anomaly import AnomalyScoreConfig, AnomalyScorer
         from thermalguard.engine.infer import StreamingInferenceEngine
         from thermalguard.models.stae import build_model
         from thermalguard.preprocessing.thermal import ThermalPreprocessConfig, ThermalPreprocessor
         from thermalguard.visualization.overlay import DashboardVisualizer
 
-        # Model
         device_str = "cuda" if _torch_cuda_available() else "cpu"
-        model = build_model({
-            "widths": (16, 32, 64, 96), "latent": 64,
-            "lstm_hidden": (64, 64), "objective": "reconstruct",
-        })
+        device = torch.device(device_str)
 
-        prep_cfg = ThermalPreprocessConfig()
+        default_cfg = {
+            "widths": (16, 32, 64, 96),
+            "latent": 64,
+            "lstm_hidden": (64, 64),
+            "objective": "reconstruct",
+        }
+        weights_path = "weights/stae_thermal_best.pt"
+        has_weights = os.path.isfile(weights_path)
+        if has_weights:
+            try:
+                ckpt = torch.load(weights_path, map_location=device, weights_only=False)
+                model_cfg = ckpt.get("model_cfg", default_cfg)
+                model = build_model(model_cfg)
+                if "model_state" in ckpt:
+                    model.load_state_dict(ckpt["model_state"])
+                saved_prep = ckpt.get("prep_cfg", {})
+                prep_cfg = ThermalPreprocessConfig.from_dict(saved_prep) if saved_prep else ThermalPreprocessConfig()
+                print(f"[+] Model weights loaded: {weights_path}")
+            except Exception as e:
+                print(f"[!] Model weights load warning: {e}")
+                model = build_model(default_cfg)
+                prep_cfg = ThermalPreprocessConfig()
+        else:
+            model = build_model(default_cfg)
+            prep_cfg = ThermalPreprocessConfig()
+
         preprocessor = ThermalPreprocessor(prep_cfg)
-
-        has_weights = os.path.isfile("weights/stae_thermal_best.pt")
         scorer = AnomalyScorer(AnomalyScoreConfig(percentile=99.2, temporal_smoothing=0.6))
         engine = StreamingInferenceEngine(
             model=model, preprocessor=preprocessor, scorer=scorer,
@@ -149,7 +189,6 @@ def run_demo_thread(llm_backend: str = "rule"):
             width=640, height=540, graph_height=170, threshold=state.threshold,
         )
 
-        # Logger + LLM
         log_dir = Path("logs")
         logger = EventLogger(
             log_dir=str(log_dir),
@@ -165,35 +204,64 @@ def run_demo_thread(llm_backend: str = "rule"):
 
         logger._callback = on_event
 
-        # Simülatör
-        sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42)
-        anomalies = [
-            SimAnomalyEvent(
-                start_frame=60, end_frame=135,
-                anomaly_type="intruder",
-                start_pos=(0.10, 0.65), end_pos=(0.90, 0.68),
-                size=(12, 24), intensity=240.0,
-            )
-        ]
-        raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
+        if source_type == "synthetic":
+            sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42)
+            anomalies = [
+                SimAnomalyEvent(
+                    start_frame=60, end_frame=135,
+                    anomaly_type="intruder",
+                    start_pos=(0.10, 0.65), end_pos=(0.90, 0.68),
+                    size=(12, 24), intensity=240.0,
+                )
+            ]
+            raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
 
-        for i, raw_frame in enumerate(raw_frames):
-            if not state.is_running:
-                break
+            for i, raw_frame in enumerate(raw_frames):
+                if not state.is_running:
+                    break
 
-            res = engine.step(raw_frame)
-            anomaly_type = anomalies[0].anomaly_type if 60 <= i <= 135 else "normal"
+                res = engine.step(raw_frame)
+                anomaly_type = anomalies[0].anomaly_type if 60 <= i <= 135 else "normal"
 
-            logger.update(
-                frame_idx=res.frame_idx,
-                is_anomaly=res.is_anomaly,
-                anomaly_score=res.anomaly_score,
-                anomaly_type="intruder" if 60 <= i <= 135 else "unknown",
-            )
+                logger.update(
+                    frame_idx=res.frame_idx,
+                    is_anomaly=res.is_anomaly,
+                    anomaly_score=res.anomaly_score,
+                    anomaly_type="intruder" if 60 <= i <= 135 else "unknown",
+                )
 
-            hud = visualizer.render_frame(res)
-            state.update_frame(hud, res)
-            time.sleep(0.05)  # ~20 FPS
+                hud = visualizer.render_frame(res)
+                state.update_frame(hud, res)
+                time.sleep(0.05)  # ~20 FPS
+        else:
+            # Canlı Kamera / RTSP / Video Dosyası / Veri Seti Klasörü
+            spec = source_param if source_param else "0"
+            fs = FrameSource(spec=spec, loop=loop)
+            gen = iter(fs)
+            try:
+                for i, raw_frame in gen:
+                    if not state.is_running:
+                        break
+
+                    res = engine.step(raw_frame)
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="anomaly" if res.is_anomaly else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+
+                    # Video / Klasör için FPS sınırlandırması
+                    if not str(spec).isdigit() and not str(spec).lower().startswith("rtsp://"):
+                        source_fps = getattr(fs, "fps", 20.0) or 20.0
+                        delay = max(0.01, (1.0 / source_fps) - (res.latency_ms / 1000.0))
+                        time.sleep(min(delay, 0.05))
+            finally:
+                if hasattr(gen, "close"):
+                    gen.close()
 
         logger.finalize()
         state.status = "done"
@@ -205,6 +273,9 @@ def run_demo_thread(llm_backend: str = "rule"):
         state.is_running = False
         import traceback
         traceback.print_exc()
+
+# Geriye dönük uyumluluk
+run_demo_thread = run_stream_thread
 
 
 def _torch_cuda_available() -> bool:
@@ -671,14 +742,36 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <span class="status-dot"></span>
       <span id="status-text">Ready</span>
     </span>
+
+    <!-- Video / Kamera Kaynağı -->
+    <select id="source-select" title="Görüntü Kaynağı" onchange="onSourceChange()">
+      <option value="ornek_1" selected>🎬 İndirilen Video (Ornek-Veri-1-Termal.mp4)</option>
+      <option value="synthetic">🎯 Sentetik Termal Simülatör (Demo)</option>
+      <option value="webcam_0">📹 Canlı Kamera (Webcam 0)</option>
+      <option value="webcam_1">📹 Harici Kamera / USB Termal (Cam 1)</option>
+      <option value="kaist">📁 KAIST Gerçek Termal Veri Seti (V000)</option>
+      <option value="rtsp">🌐 RTSP IP Termal Kamera</option>
+      <option value="custom">📂 Özel Dosya / Klasör Yolu</option>
+    </select>
+
+    <input id="source-input" type="text" placeholder="rtsp://... veya video.mp4"
+           style="display:none; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:13px; width:220px;" />
+
+    <input type="file" id="video-file-picker" accept="video/*,.mp4,.avi,.mkv" style="display:none;" onchange="handleVideoUpload(this)">
+    <button type="button" class="btn btn-secondary" onclick="document.getElementById('video-file-picker').click()" title="Bilgisayarınızdan video yükleyin">📁 Video Yükle</button>
+
+    <label style="font-size:12px; display:inline-flex; align-items:center; gap:4px; color:var(--text-muted); cursor:pointer;">
+      <input type="checkbox" id="loop-check" checked> Tekrarla
+    </label>
+
     <select id="llm-select" title="LLM Incident Summary Model">
       <option value="rule">Rule-Based (Offline)</option>
       <option value="ollama">Ollama (Local LLM)</option>
       <option value="openai">OpenAI GPT</option>
       <option value="google">Google Gemini</option>
     </select>
-    <button id="start-btn" class="btn btn-primary" onclick="startDemo()">Start Demo</button>
-    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">Stop</button>
+    <button id="start-btn" class="btn btn-primary" onclick="startStream()">▶️ Başlat</button>
+    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">⏹️ Durdur</button>
     <a href="/report" target="_blank" class="btn btn-secondary">Report</a>
     <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Light/Dark Theme">🌙</button>
   </div>
@@ -803,33 +896,140 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       const btn = document.getElementById('theme-btn');
       if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
       drawScoreGraph(currentThreshold);
+
+      // Sayfa ilk yüklendiğinde akış durumunu senkronize et
+      fetch('/api/status').then(r => r.json()).then(s => {
+        if (s.status === 'running') {
+          document.getElementById('start-btn').style.display = 'none';
+          document.getElementById('stop-btn').style.display = 'inline-flex';
+          startVideoPlayback();
+          startPolling();
+        } else {
+          document.getElementById('start-btn').style.display = 'inline-flex';
+          document.getElementById('start-btn').disabled = false;
+          document.getElementById('stop-btn').style.display = 'none';
+        }
+      }).catch(() => {});
     });
   })();
 
-  function startDemo() {
+  function onSourceChange() {
+    const sel = document.getElementById('source-select').value;
+    const inp = document.getElementById('source-input');
+    if (sel === 'rtsp') {
+      inp.style.display = 'inline-block';
+      inp.placeholder = 'rtsp://user:pass@192.168.1.100:554/live';
+      if (!inp.value.startsWith('rtsp://')) inp.value = 'rtsp://';
+    } else if (sel === 'custom') {
+      inp.style.display = 'inline-block';
+      inp.placeholder = 'data/ornek.mp4 veya klasör';
+    } else {
+      inp.style.display = 'none';
+    }
+  }
+
+  function handleVideoUpload(input) {
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    const formData = new FormData();
+    formData.append('video', file);
+
+    const btn = document.getElementById('start-btn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Yükleniyor...';
+
+    fetch('/api/upload_video', {
+      method: 'POST',
+      body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+      btn.disabled = false;
+      btn.textContent = origText;
+      if (data.ok) {
+        document.getElementById('source-select').value = 'custom';
+        const inp = document.getElementById('source-input');
+        inp.style.display = 'inline-block';
+        inp.value = data.path;
+        alert('Video başarıyla yüklendi: ' + data.filename + '\\nBaşlat butonuna basarak izleyebilirsiniz.');
+      } else {
+        alert('Yükleme hatası: ' + (data.error || 'Bilinmeyen hata'));
+      }
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.textContent = origText;
+      alert('Yükleme başarısız: ' + err);
+    });
+  }
+
+  function startStream() {
     const llm = document.getElementById('llm-select').value;
-    fetch('/api/run_demo?llm=' + llm, { method: 'POST' })
+    const sourceSel = document.getElementById('source-select').value;
+    const sourceInp = document.getElementById('source-input').value.trim();
+    const loop = document.getElementById('loop-check').checked;
+
+    let source = sourceSel;
+    let param = '';
+
+    if (sourceSel === 'ornek_1') {
+      source = 'file';
+      param = 'data/Ornek-Veri-1-Termal.mp4';
+    } else if (sourceSel === 'synthetic') {
+      source = 'synthetic';
+    } else if (sourceSel === 'webcam_0') {
+      source = 'webcam';
+      param = '0';
+    } else if (sourceSel === 'webcam_1') {
+      source = 'webcam';
+      param = '1';
+    } else if (sourceSel === 'kaist') {
+      source = 'folder';
+      param = 'data/kaist_survey/images/set00/V000/lwir';
+    } else if (sourceSel === 'rtsp') {
+      source = 'rtsp';
+      param = sourceInp;
+      if (!param || param === 'rtsp://') {
+        alert('Lütfen geçerli bir RTSP adresi girin (örn: rtsp://192.168.1.50/stream)');
+        return;
+      }
+    } else if (sourceSel === 'custom') {
+      source = 'custom';
+      param = sourceInp;
+      if (!param) {
+        alert('Lütfen bir video dosyası veya klasör yolu girin veya "Video Yükle" butonunu kullanın.');
+        return;
+      }
+    }
+
+    const url = `/api/run_stream?llm=${encodeURIComponent(llm)}&source=${encodeURIComponent(source)}&param=${encodeURIComponent(param)}&loop=${loop}`;
+    fetch(url, { method: 'POST' })
       .then(r => r.json())
       .then(d => {
         if (d.ok) {
-          document.getElementById('start-btn').disabled = true;
-          document.getElementById('stop-btn').style.display = '';
-          startStream();
+          document.getElementById('start-btn').style.display = 'none';
+          document.getElementById('stop-btn').style.display = 'inline-flex';
+          startVideoPlayback();
           startPolling();
         } else {
-          alert('Error: ' + (d.error || 'Unknown'));
+          alert('Hata: ' + (d.error || 'Bilinmeyen'));
         }
-      });
+      })
+      .catch(err => alert('Sunucu bağlantı hatası: ' + err));
   }
+
+  window.startDemo = startStream;
 
   function stopDemo() {
     fetch('/api/stop', { method: 'POST' });
+    document.getElementById('start-btn').style.display = 'inline-flex';
     document.getElementById('start-btn').disabled = false;
     document.getElementById('stop-btn').style.display = 'none';
     stopPolling();
   }
 
-  function startStream() {
+  function startVideoPlayback() {
     const img = document.getElementById('stream-img');
     const placeholder = document.getElementById('stream-placeholder');
     img.src = '/stream?t=' + Date.now();
@@ -838,7 +1038,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     img.onerror = () => {
       if (streamRetry < 10) {
         streamRetry++;
-        setTimeout(startStream, 800);
+        setTimeout(startVideoPlayback, 800);
       }
     };
   }
@@ -863,8 +1063,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       updateEvents(eventsResp);
       if (statusResp.status === 'done' || statusResp.status === 'error') {
         stopPolling();
+        document.getElementById('start-btn').style.display = 'inline-flex';
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').style.display = 'none';
+        if (statusResp.status === 'error' && statusResp.error) {
+          alert('Akış Hatası: ' + statusResp.error);
+        }
       }
     } catch (e) { /* network delay */ }
   }
@@ -1232,14 +1436,39 @@ def stream():
     )
 
 
+UPLOAD_FOLDER = Path("data/uploads")
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+
+
+@app.route("/api/upload_video", methods=["POST"])
+def upload_video():
+    """Kullanıcının yüklediği video dosyasını kaydeder."""
+    if "video" not in request.files:
+        return jsonify({"ok": False, "error": "Dosya yüklenmedi"}), 400
+    file = request.files["video"]
+    if not file.filename:
+        return jsonify({"ok": False, "error": "Geçersiz dosya adı"}), 400
+    safe_name = os.path.basename(file.filename)
+    dest = UPLOAD_FOLDER / safe_name
+    file.save(str(dest))
+    return jsonify({"ok": True, "path": str(dest).replace("\\", "/"), "filename": safe_name})
+
+
+@app.route("/api/run_stream", methods=["POST"])
 @app.route("/api/run_demo", methods=["POST"])
-def run_demo():
+def run_stream():
+    """Seçilen kaynaktan akışı veya demoyu başlatır."""
     if state.is_running:
-        return jsonify({"ok": False, "error": "Demo is already running"})
-    from flask import request
+        state.is_running = False
+        time.sleep(0.15)
     llm = request.args.get("llm", "rule")
+    source = request.args.get("source", "synthetic")
+    param = request.args.get("param", "")
+    loop = request.args.get("loop", "true").lower() in ("true", "1", "yes")
+
+    state.reset()
     state.is_running = True
-    t = threading.Thread(target=run_demo_thread, args=(llm,), daemon=True)
+    t = threading.Thread(target=run_stream_thread, args=(source, param, llm, loop), daemon=True)
     t.start()
     return jsonify({"ok": True})
 

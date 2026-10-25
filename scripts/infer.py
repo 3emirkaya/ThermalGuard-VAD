@@ -58,6 +58,8 @@ def parse_args():
     p.add_argument("--threshold", type=float, default=0.20, help="Anomaly alert score threshold")
     p.add_argument("--clip-len", type=int, default=8)
     p.add_argument("--max-frames", type=int, default=180, help="Maximum number of frames to process")
+    p.add_argument("--start-frame", type=int, default=0, help="Start frame index in the source video")
+    p.add_argument("--stride", type=int, default=1, help="Temporal sampling stride (e.g. 2 for every 2nd frame)")
     p.add_argument("--gif", default="demo.gif", help="Output GIF path")
     p.add_argument("--mp4", default="", help="Output MP4 video path (optional)")
     p.add_argument("--device", default="", help="cuda | cpu | (empty = auto)")
@@ -175,7 +177,7 @@ def main():
         fps = 20.0
     else:
         print(f"[i] Frame Source: {args.source}")
-        source = FrameSource(args.source, max_frames=args.max_frames)
+        source = FrameSource(args.source, start=args.start_frame, stride=args.stride, max_frames=args.max_frames)
         frames_generator = list(source)
         fps = getattr(source, "fps", 20.0)
 

@@ -11,7 +11,12 @@
 ---
 
 ![ThermalGuard-VAD Tactical HUD Banner](demo.gif)
-> **Figure 1 / Şekil 1:** `ThermalGuard-VAD` Real-Time Tactical Dashboard. **Top Panel:** Live scrolling Anomaly Score timeline with dynamic threshold line and alert state badge. **Bottom Left:** Preprocessed Long-Wave Infrared (LWIR) feed with CLAHE and bilateral filtering. **Bottom Right:** Spatial Reconstruction Error Heatmap highlighting an unauthorized intruder breaching the perimeter fence.
+> **Figure 1 / Şekil 1:** `ThermalGuard-VAD` Real-Time Tactical Dashboard (Synthetic Perimeter Simulation). **Top Panel:** Live scrolling Anomaly Score timeline with dynamic threshold line and alert state badge. **Bottom Left:** Preprocessed Long-Wave Infrared (LWIR) feed with CLAHE and bilateral filtering. **Bottom Right:** Spatial Reconstruction Error Heatmap highlighting an unauthorized intruder breaching the perimeter fence.
+
+---
+
+![ThermalGuard-VAD Operational Field Thermal Benchmark](demo_field_thermal.gif)
+> **Figure 2 / Şekil 2:** `ThermalGuard-VAD` Live Operational Field Thermal Benchmark (Real 640×512 LWIR Sensor Feed). Real-time spatio-temporal anomaly localization, dynamic score elevation, and tactical intruder bounding-box tracking on an authentic thermal defense surveillance sequence.
 
 ---
 
