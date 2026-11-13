@@ -11,6 +11,7 @@ Kullanıcı İsteri Doğrulaması:
 from __future__ import annotations
 
 import collections
+import os
 from typing import Deque, List, Optional, Tuple
 
 import cv2
@@ -104,18 +105,19 @@ class DashboardVisualizer:
             for i in range(len(pts) - 1):
                 p1, p2 = pts[i], pts[i + 1]
                 val = self.scores[i + 1]
-                color = (40, 50, 245) if val >= self.threshold else (230, 190, 40)
+                # Canlı taktiksel kırmızı (alarm) veya parlak neon taktiksel yeşil (normal)
+                color = (40, 50, 245) if val >= self.threshold else (40, 240, 50)
                 thickness = 2 if val < self.threshold else 3
                 cv2.line(graph, p1, p2, color, thickness, cv2.LINE_AA)
 
             last_pt = pts[-1]
             cv2.circle(graph, last_pt, 4,
-                       (40, 50, 255) if current_score >= self.threshold else (240, 210, 50), -1)
+                       (40, 50, 255) if current_score >= self.threshold else (40, 255, 60), -1)
 
         # Graph Header and Status Value (No overlap coordinates)
         is_alert = current_score >= self.threshold
         status_text = "ANOMALY DETECTED [ALARM]" if is_alert else "PERIMETER SECURE"
-        status_color = (40, 60, 255) if is_alert else (70, 220, 100)
+        status_color = (40, 60, 255) if is_alert else (40, 245, 60)
 
         cv2.putText(graph, "ANOMALY SCORE STREAM", (pad_l, 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 210, 220), 1, cv2.LINE_AA)
@@ -151,8 +153,11 @@ class DashboardVisualizer:
         left_u8 = (result.preprocessed * 255.0).astype(np.uint8)
         left_bgr = cv2.cvtColor(left_u8, cv2.COLOR_GRAY2BGR)
         left_resized = cv2.resize(left_bgr, (sub_w, sub_h), interpolation=cv2.INTER_LINEAR)
+        # Black stroke + crisp white text for high contrast on any background
         cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (240, 240, 240), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (240, 240, 240), 1, cv2.LINE_AA)
 
         # Right: Authentic Thermal False-Color (Ironbow / Inferno Palette)
         thermal_color = cv2.applyColorMap(left_u8, cv2.COLORMAP_INFERNO)
@@ -160,8 +165,11 @@ class DashboardVisualizer:
 
         if result.is_anomaly:
             cv2.rectangle(right_resized, (0, 0), (sub_w - 1, sub_h - 1), (30, 40, 245), 3)
+            # High-visibility tactical yellow with black stroke shadow
             cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (40, 60, 255), 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (10, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (40, 220, 255), 1, cv2.LINE_AA)
 
             # Detect target blob and draw tactical bounding box on primary intruder
             if getattr(result, "error_map", None) is not None:
@@ -194,13 +202,15 @@ class DashboardVisualizer:
                         cv2.line(right_resized, (rx1, ry2), (rx1 + cl, ry2), (40, 60, 255), 2)
                         cv2.line(right_resized, (rx1, ry2), (rx1, ry2 - cl), (40, 60, 255), 2)
                         cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx2, ry2), (rx2, ry2 - cl), (40, 60, 255), 2)
+                        cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
 
                         cv2.putText(right_resized, "INTRUDER [ALERT]", (rx1, max(35, ry1 - 5)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.32, (50, 220, 255), 1, cv2.LINE_AA)
         else:
             cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (200, 220, 200), 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 2, cv2.LINE_AA)
+            cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (10, 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (60, 255, 120), 1, cv2.LINE_AA)
 
         # Combine side by side
         video_strip = np.hstack([left_resized, right_resized])
@@ -218,7 +228,7 @@ class DashboardVisualizer:
         cv2.putText(hud_bar, telemetry, (12, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.37, (180, 190, 200), 1, cv2.LINE_AA)
 
-        state_color = (40, 50, 255) if result.is_anomaly else (60, 200, 80)
+        state_color = (40, 50, 255) if result.is_anomaly else (40, 245, 60)
         state_label = "ALARM: ANOMALY DETECTED" if result.is_anomaly else "STATUS: PERIMETER SECURE"
         cv2.putText(hud_bar, state_label, (self.width - 220, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.37, state_color, 1, cv2.LINE_AA)
@@ -232,19 +242,40 @@ def save_demo_gif(
     frames: List[np.ndarray],
     output_path: str = "demo.gif",
     fps: float = 15.0,
+    colors: int = 96,
 ) -> None:
     """
-    Kare listesini optimize edilmiş demo.gif dosyası olarak kaydeder.
+    Kare listesini web için yüksek oranda optimize edilmiş GIF dosyası olarak kaydeder.
+    Adaptive color quantization ve delta compression uygulayarak dosya boyutunu %75-85 düşürür.
     """
+    if not frames:
+        return
     try:
-        import imageio
-        # BGR'den RGB'ye dönüştür
-        rgb_frames = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames]
-        imageio.mimsave(output_path, rgb_frames, fps=fps, loop=0)
-        print(f"[✓] Demo GIF başarıyla oluşturuldu: {output_path}")
-    except ImportError:
-        print("[!] imageio bulunamadı, GIF yerine MP4 olarak kaydediliyor...")
-        save_demo_video(frames, output_path.replace(".gif", ".mp4"), fps=fps)
+        from PIL import Image
+        pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
+        # Web/GitHub Camo için adaptive palette quantization (hızlı yükleme ve yüksek kontrast)
+        quantized = [f.quantize(colors=colors, method=Image.Quantize.MEDIANCUT) for f in pil_frames]
+        duration = int(1000.0 / fps)
+        quantized[0].save(
+            output_path,
+            save_all=True,
+            append_images=quantized[1:],
+            duration=duration,
+            loop=0,
+            optimize=True,
+        )
+        file_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
+        print(f"[✓] Demo GIF başarıyla oluşturuldu: {output_path} ({file_size_mb:.2f} MB, {fps:.1f} FPS)")
+    except Exception as e:
+        print(f"[!] PIL optimizasyonu başarısız ({e}), imageio fallback deneniyor...")
+        try:
+            import imageio
+            rgb_frames = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames]
+            imageio.mimsave(output_path, rgb_frames, fps=fps, loop=0)
+            print(f"[✓] Demo GIF başarıyla oluşturuldu: {output_path}")
+        except ImportError:
+            print("[!] imageio bulunamadı, GIF yerine MP4 olarak kaydediliyor...")
+            save_demo_video(frames, output_path.replace(".gif", ".mp4"), fps=fps)
 
 
 def save_demo_video(

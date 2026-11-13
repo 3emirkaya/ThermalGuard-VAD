@@ -53,6 +53,7 @@ data/raw/
 data/kaist/
 data/kaist_survey/
 data/uploads/
+data/*.npy
 *.mp4
 *.avi
 *.mkv
