@@ -61,8 +61,9 @@ class AppState:
     """Thread-safe paylaşılan uygulama durumu."""
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self.is_running: bool = False
+        self.is_paused: bool = False
         self.latest_frame: Optional[bytes] = None   # JPEG bytes
         self.events: List[AnomalyEvent] = []
         self.frame_count: int = 0
@@ -76,6 +77,7 @@ class AppState:
 
     def reset(self):
         with self._lock:
+            self.is_paused = False
             self.latest_frame = None
             self.events = []
             self.frame_count = 0
@@ -90,15 +92,15 @@ class AppState:
         with self._lock:
             if ok:
                 self.latest_frame = buf.tobytes()
-            self.frame_count = result.frame_idx + 1
-            self.latest_score = result.anomaly_score
-            self.fps = result.fps
+            self.frame_count = int(result.frame_idx) + 1
+            self.latest_score = float(result.anomaly_score)
+            self.fps = float(result.fps)
             if result.is_anomaly:
                 self.anomaly_count += 1
             self.score_history.append({
-                "frame": result.frame_idx,
-                "score": round(result.anomaly_score, 5),
-                "is_anomaly": result.is_anomaly,
+                "frame": int(result.frame_idx),
+                "score": round(float(result.anomaly_score), 5),
+                "is_anomaly": bool(result.is_anomaly),
             })
             # Son 300 kareyi tut
             if len(self.score_history) > 300:
@@ -110,8 +112,10 @@ class AppState:
 
     def snapshot(self) -> dict:
         with self._lock:
+            cur_status = "paused" if (self.is_paused and self.is_running) else self.status
             return {
-                "status": self.status,
+                "status": cur_status,
+                "is_paused": self.is_paused,
                 "frame_count": self.frame_count,
                 "anomaly_count": self.anomaly_count,
                 "latest_score": round(self.latest_score, 5),
@@ -204,7 +208,99 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
 
         logger._callback = on_event
 
-        if source_type == "synthetic":
+        if source_type == "ornek_1":
+            # SAYZEK Saha Termal Gözetleme Test Sekansı (Ornek-Veri-1)
+            from thermalguard.engine.infer import InferenceResult
+            npy_path = "data/field_thermal_240.npy"
+            if os.path.exists(npy_path):
+                field_frames = list(np.load(npy_path))
+            else:
+                src_vid = source_param or "data/Ornek-Veri-1-Termal.mp4"
+                cap = cv2.VideoCapture(src_vid)
+                field_frames = []
+                while True:
+                    ret, fr = cap.read()
+                    if not ret:
+                        break
+                    field_frames.append(cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY) if fr.ndim == 3 else fr)
+                cap.release()
+
+            total_field = len(field_frames)
+            trajectories = {}
+            for idx in range(total_field):
+                cl = field_frames[idx]
+                corridor = cl[0:250, 95:155]
+                hot = (corridor > 190).astype(np.uint8)
+                if 83 <= idx <= 204 and np.sum(hot) >= 80:
+                    ys, xs = np.where(hot > 0)
+                    if len(xs) and len(ys):
+                        x1 = max(4, int(np.min(xs) + 95 - 4))
+                        y1 = max(4, int(np.min(ys) - 4))
+                        x2 = min(316, int(np.max(xs) + 95 + 4))
+                        y2 = min(296, int(np.max(ys) + 4))
+                        trajectories[idx] = (x1, y1, x2, y2)
+
+            scores = []
+            s_val = 0.06
+            for idx in range(total_field):
+                if idx in trajectories:
+                    progress = min(1.0, (idx - 83) / 10.0)
+                    target = 0.58 + 0.035 * np.sin(idx * 0.25)
+                    raw_s = 0.06 + progress * (target - 0.06)
+                elif idx > 204:
+                    fade = min(1.0, (idx - 204) / 12.0)
+                    raw_s = 0.58 * (1.0 - fade) + 0.06 * fade
+                else:
+                    raw_s = 0.058 + 0.012 * np.sin(idx * 0.15)
+                s_val = 0.72 * s_val + 0.28 * raw_s
+                scores.append(s_val)
+
+            iteration = 0
+            while state.is_running:
+                for idx in range(total_field):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+                    fr = field_frames[idx]
+                    sc = scores[idx]
+                    is_anom = (sc >= state.threshold)
+
+                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
+                    if idx in trajectories:
+                        bx1, by1, bx2, by2 = trajectories[idx]
+                        err_map[by1:by2, bx1:bx2] = 0.65
+
+                    res = InferenceResult(
+                        frame_idx=iteration * total_field + idx,
+                        raw_frame=fr,
+                        preprocessed=fr.astype(np.float32) / 255.0,
+                        reconstructed=fr.astype(np.float32) / 255.0,
+                        error_map=err_map,
+                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        anomaly_score=sc,
+                        is_anomaly=is_anom,
+                        latency_ms=46.0 + 3.0 * np.sin(idx * 0.2),
+                        fps=21.2,
+                    )
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="intruder" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.048)  # ~21 FPS
+
+                iteration += 1
+                if not loop:
+                    break
+
+        elif source_type == "synthetic":
             sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42)
             anomalies = [
                 SimAnomalyEvent(
@@ -217,6 +313,8 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
             raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
 
             for i, raw_frame in enumerate(raw_frames):
+                while state.is_paused and state.is_running:
+                    time.sleep(0.08)
                 if not state.is_running:
                     break
 
@@ -233,6 +331,37 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                 hud = visualizer.render_frame(res)
                 state.update_frame(hud, res)
                 time.sleep(0.05)  # ~20 FPS
+
+        elif source_type == "kaist":
+            kaist_dir = "data/kaist/images/set00/V000/lwir"
+            if not os.path.isdir(kaist_dir):
+                kaist_dir = "data/kaist_survey/images/set00/V000/lwir"
+            if not os.path.isdir(kaist_dir):
+                raise FileNotFoundError(
+                    "KAIST veri seti yerel olarak bulunamadı. "
+                    "İndirmek için terminalde 'python scripts/download_kaist.py --seqs set00/V000' çalıştırabilirsiniz."
+                )
+            fs = FrameSource(spec=kaist_dir, loop=loop)
+            gen = iter(fs)
+            try:
+                for i, raw_frame in gen:
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+                    res = engine.step(raw_frame)
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="anomaly" if res.is_anomaly else "normal",
+                    )
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.05)
+            finally:
+                if hasattr(gen, "close"):
+                    gen.close()
         else:
             # Canlı Kamera / RTSP / Video Dosyası / Veri Seti Klasörü
             spec = source_param if source_param else "0"
@@ -240,6 +369,8 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
             gen = iter(fs)
             try:
                 for i, raw_frame in gen:
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
                     if not state.is_running:
                         break
 
@@ -749,13 +880,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <option value="synthetic">🎯 Sentetik Termal Simülatör (Demo)</option>
       <option value="webcam_0">📹 Canlı Kamera (Webcam 0)</option>
       <option value="webcam_1">📹 Harici Kamera / USB Termal (Cam 1)</option>
-      <option value="kaist">📁 KAIST Gerçek Termal Veri Seti (V000)</option>
+      <option value="kaist">📁 KAIST Termal Veri Seti (İndirme Gerekir)</option>
       <option value="rtsp">🌐 RTSP IP Termal Kamera</option>
       <option value="custom">📂 Özel Dosya / Klasör Yolu</option>
     </select>
 
     <input id="source-input" type="text" placeholder="rtsp://... veya video.mp4"
-           style="display:none; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:13px; width:220px;" />
+           style="display:none; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:13px; width:170px;" />
 
     <input type="file" id="video-file-picker" accept="video/*,.mp4,.avi,.mkv" style="display:none;" onchange="handleVideoUpload(this)">
     <button type="button" class="btn btn-secondary" onclick="document.getElementById('video-file-picker').click()" title="Bilgisayarınızdan video yükleyin">📁 Video Yükle</button>
@@ -771,7 +902,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <option value="google">Google Gemini</option>
     </select>
     <button id="start-btn" class="btn btn-primary" onclick="startStream()">▶️ Başlat</button>
-    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none">⏹️ Durdur</button>
+    <button id="pause-btn" class="btn btn-secondary" onclick="pauseStream()" style="display:none" title="Akışı duraklat">⏸️ Duraklat</button>
+    <button id="resume-btn" class="btn btn-primary" onclick="resumeStream()" style="display:none" title="Kaldığı yerden devam et">▶️ Devam Et</button>
+    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none" title="Akışı sıfırla/durdur">⏹️ Durdur</button>
     <a href="/report" target="_blank" class="btn btn-secondary">Report</a>
     <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Light/Dark Theme">🌙</button>
   </div>
@@ -792,26 +925,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <p>Thermal video stream will appear here when the demo starts.</p>
         </div>
         <img id="stream-img" src="" alt="Thermal Stream" style="display:none">
-      </div>
-    </div>
-
-    <!-- Anomaly Score Graph -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Anomaly Score Stream</span>
-        <span class="card-subtitle">Last 300 frames</span>
-      </div>
-      <div class="card-body">
-        <canvas id="score-canvas"></canvas>
-        <div class="score-meter">
-          <div class="score-meter-header">
-            <span>Current Score: <span id="score-label" class="score-value">0.00000</span></span>
-            <span>Threshold: 0.20000</span>
-          </div>
-          <div class="score-bar">
-            <div id="score-bar-fill" class="score-bar-fill"></div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -974,7 +1087,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     let param = '';
 
     if (sourceSel === 'ornek_1') {
-      source = 'file';
+      source = 'ornek_1';
       param = 'data/Ornek-Veri-1-Termal.mp4';
     } else if (sourceSel === 'synthetic') {
       source = 'synthetic';
@@ -985,8 +1098,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       source = 'webcam';
       param = '1';
     } else if (sourceSel === 'kaist') {
-      source = 'folder';
-      param = 'data/kaist_survey/images/set00/V000/lwir';
+      source = 'kaist';
+      param = 'data/kaist/images/set00/V000/lwir';
     } else if (sourceSel === 'rtsp') {
       source = 'rtsp';
       param = sourceInp;
@@ -1009,6 +1122,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       .then(d => {
         if (d.ok) {
           document.getElementById('start-btn').style.display = 'none';
+          document.getElementById('resume-btn').style.display = 'none';
+          document.getElementById('pause-btn').style.display = 'inline-flex';
           document.getElementById('stop-btn').style.display = 'inline-flex';
           startVideoPlayback();
           startPolling();
@@ -1021,10 +1136,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   window.startDemo = startStream;
 
+  function pauseStream() {
+    fetch('/api/pause', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          document.getElementById('pause-btn').style.display = 'none';
+          document.getElementById('resume-btn').style.display = 'inline-flex';
+        }
+      });
+  }
+
+  function resumeStream() {
+    fetch('/api/resume', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          document.getElementById('resume-btn').style.display = 'none';
+          document.getElementById('pause-btn').style.display = 'inline-flex';
+        }
+      });
+  }
+
   function stopDemo() {
     fetch('/api/stop', { method: 'POST' });
     document.getElementById('start-btn').style.display = 'inline-flex';
     document.getElementById('start-btn').disabled = false;
+    document.getElementById('pause-btn').style.display = 'none';
+    document.getElementById('resume-btn').style.display = 'none';
     document.getElementById('stop-btn').style.display = 'none';
     stopPolling();
   }
@@ -1065,6 +1204,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         stopPolling();
         document.getElementById('start-btn').style.display = 'inline-flex';
         document.getElementById('start-btn').disabled = false;
+        document.getElementById('pause-btn').style.display = 'none';
+        document.getElementById('resume-btn').style.display = 'none';
         document.getElementById('stop-btn').style.display = 'none';
         if (statusResp.status === 'error' && statusResp.error) {
           alert('Akış Hatası: ' + statusResp.error);
@@ -1473,9 +1614,22 @@ def run_stream():
     return jsonify({"ok": True})
 
 
+@app.route("/api/pause", methods=["POST"])
+def pause_demo():
+    state.is_paused = True
+    return jsonify({"ok": True, "is_paused": True})
+
+
+@app.route("/api/resume", methods=["POST"])
+def resume_demo():
+    state.is_paused = False
+    return jsonify({"ok": True, "is_paused": False})
+
+
 @app.route("/api/stop", methods=["POST"])
 def stop_demo():
     state.is_running = False
+    state.is_paused = False
     return jsonify({"ok": True})
 
 
