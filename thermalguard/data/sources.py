@@ -1,9 +1,9 @@
 """
-Kare kaynakları — tek bir arayüzle video dosyası, görüntü klasörü, KAIST sekansı,
-canlı kamera (USB/RTSP) okuma.
+Frame sources — unified interface for reading video files, image sequences, KAIST benchmarks,
+and live cameras (USB/RTSP).
 
-16-bit radyometrik TIFF/PNG kareler ``IMREAD_UNCHANGED`` ile bit derinliği
-korunarak okunur (AGC ön işleme modülünde yapılır).
+16-bit radiometric TIFF/PNG frames are read with ``IMREAD_UNCHANGED`` preserving bit depth
+(handled downstream by the AGC preprocessing module).
 """
 from __future__ import annotations
 
@@ -37,13 +37,13 @@ def list_images(folder: str | os.PathLike) -> list[str]:
 @dataclass
 class FrameSource:
     """
-    Birleşik kare kaynağı.
+    Unified frame source.
 
-    ``spec`` örnekleri:
-      * ``data/kaist/images/set00/V000/lwir``  (klasör)
-      * ``video.mp4``                          (video dosyası)
-      * ``0``                                   (USB kamera indeksi)
-      * ``rtsp://192.168.1.10/stream``          (IP termal kamera)
+    ``spec`` examples:
+      * ``data/kaist/images/set00/V000/lwir``  (folder)
+      * ``video.mp4``                          (video file)
+      * ``0``                                  (USB camera index)
+      * ``rtsp://192.168.1.10/stream``         (IP thermal camera)
     """
 
     spec: str
@@ -61,11 +61,11 @@ class FrameSource:
             if not files and os.path.isdir(os.path.join(s, "lwir")):
                 files = list_images(os.path.join(s, "lwir"))
             if not files:
-                raise FileNotFoundError(f"klasörde görüntü yok: {s}")
+                raise FileNotFoundError(f"no images found in directory: {s}")
             self._files = files[self.start::max(1, self.stride)]
             if self.max_frames:
                 self._files = self._files[: self.max_frames]
-            self.fps = 20.0 / max(1, self.stride)  # KAIST 20 Hz
+            self.fps = 20.0 / max(1, self.stride)  # KAIST benchmark 20 Hz
 
     @property
     def files(self) -> Optional[list[str]]:
@@ -75,7 +75,7 @@ class FrameSource:
         if self._files is not None:
             return len(self._files)
         if str(self.spec).isdigit():
-            return 0  # Canlı kamera akışı
+            return 0  # Live camera stream
         cap = self._open_capture()
         n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
@@ -93,7 +93,7 @@ class FrameSource:
         return cv2.VideoCapture(arg)
 
     def __iter__(self) -> Iterator[tuple[int, np.ndarray]]:
-        """(kare_indeksi, ham_kare) üretir."""
+        """Yields (frame_index, raw_frame)."""
         if self._files is not None:
             while True:
                 for i, f in enumerate(self._files):
@@ -102,7 +102,7 @@ class FrameSource:
                     return
         cap = self._open_capture()
         if not cap.isOpened():
-            raise IOError(f"kaynak açılamadı: {self.spec}")
+            raise IOError(f"cannot open video source: {self.spec}")
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps and fps > 0:
             self.fps = fps / max(1, self.stride)
@@ -129,7 +129,7 @@ class FrameSource:
 
 
 def frame_index_from_path(path: str) -> int:
-    """'I01234.jpg' → 1234 ; sayı bulunamazsa -1."""
+    """'I01234.jpg' -> 1234 ; -1 if no digits found."""
     stem = Path(path).stem
     digits = "".join(ch for ch in stem if ch.isdigit())
     return int(digits) if digits else -1

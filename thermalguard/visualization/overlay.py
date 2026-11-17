@@ -1,12 +1,13 @@
 """
-Taktiksel Savunma Gösterge Paneli (Dashboard) ve Video Görselleştirici.
+Tactical Defense Dashboard and Video Visualizer.
 
-Kullanıcı İsteri Doğrulaması:
------------------------------
-* Üst Kısım: Anlık akan "Anomali Skoru" zaman serisi grafiği (Eşik çizgisi, normal/alarm renkleri, FPS).
-* Alt Kısım: Termal görüntü üzerinde anomalinin olduğu bölgeyi ısı haritası
-  (Reconstruction Error Heatmap) ile kırmızıya/JET renk skalasına boyayan panel.
-* Çıktı: Doğrudan demo.gif ve demo.mp4 oluşturabilme yeteneği.
+Capabilities:
+-------------
+* Top Panel: Real-time scrolling "Anomaly Score" time-series graph with threshold line,
+  tactical status colors, and telemetry.
+* Bottom Panel: Dual-stream visualization with raw LWIR White-Hot thermal stream on the left,
+  and colorized Ironbow fusion with reconstruction error highlighting and tactical bounding box on the right.
+* Export: Directly exports optimized web demo.gif and tactical demo.mp4 files.
 """
 from __future__ import annotations
 
@@ -22,8 +23,8 @@ from ..engine.infer import InferenceResult
 
 class DashboardVisualizer:
     """
-    Üst panelde akan anomali grafiği, alt panelde termal ısı haritası bindirmesi
-    içeren savunma sanayii taktiksel HUD video karesi üretir.
+    Renders military-grade tactical HUD video frames featuring top scrolling
+    anomaly graph and bottom dual-feed infrared thermal fusion.
     """
 
     def __init__(
@@ -58,23 +59,23 @@ class DashboardVisualizer:
         h: int,
     ) -> np.ndarray:
         """
-        Üst panel: OpenCV ile optimize edilmiş kayan zaman serisi anomali skoru grafiği.
+        Top panel: OpenCV-optimized scrolling time-series anomaly score graph.
         """
-        graph = np.full((h, w, 3), 22, dtype=np.uint8)  # Koyu taktiksel gri arka plan
+        graph = np.full((h, w, 3), 22, dtype=np.uint8)  # Dark tactical slate background
 
-        # Kenar boşlukları
+        # Margins and plot dimensions
         pad_l, pad_r, pad_t, pad_b = 60, 20, 30, 25
         plot_w = w - pad_l - pad_r
         plot_h = h - pad_t - pad_b
 
-        # Çizim alanı arka planı
+        # Plot background canvas
         cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (32, 35, 40), -1)
         cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (65, 75, 85), 1)
 
-        # Y ekseni ölçeği (0.0 ile en az 0.8 veya max_score * 1.25)
+        # Y-axis scaling (0.0 to at least 0.8 or max_score * 1.25)
         max_y = max(0.8, self.threshold * 1.8, max(self.scores) * 1.25 if self.scores else 0.8)
 
-        # Izgara çizgileri (Y ekseni)
+        # Y-axis grid lines and labels
         for val in [0.2, 0.4, 0.6, 0.8]:
             if val < max_y:
                 y_px = int(pad_t + plot_h * (1.0 - val / max_y))
@@ -82,7 +83,7 @@ class DashboardVisualizer:
                 cv2.putText(graph, f"{val:.1f}", (pad_l - 42, y_px + 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (140, 150, 160), 1, cv2.LINE_AA)
 
-        # EŞİK ÇİZGİSİ (Threshold Line)
+        # Threshold reference line
         thresh_y = int(pad_t + plot_h * (1.0 - self.threshold / max_y))
         if pad_t <= thresh_y <= pad_t + plot_h:
             dash_w = 8
@@ -93,7 +94,7 @@ class DashboardVisualizer:
                         (pad_l + plot_w - 140, thresh_y - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.36, (80, 90, 245), 1, cv2.LINE_AA)
 
-        # Skor eğrisini çiz
+        # Plot scrolling score trajectory
         if len(self.scores) >= 2:
             n_pts = len(self.scores)
             pts = []
@@ -105,7 +106,7 @@ class DashboardVisualizer:
             for i in range(len(pts) - 1):
                 p1, p2 = pts[i], pts[i + 1]
                 val = self.scores[i + 1]
-                # Canlı taktiksel kırmızı (alarm) veya parlak neon taktiksel yeşil (normal)
+                # Electric alert red or bright neon green
                 color = (40, 50, 245) if val >= self.threshold else (40, 240, 50)
                 thickness = 2 if val < self.threshold else 3
                 cv2.line(graph, p1, p2, color, thickness, cv2.LINE_AA)
@@ -253,15 +254,15 @@ def save_demo_gif(
     colors: int = 96,
 ) -> None:
     """
-    Kare listesini web için yüksek oranda optimize edilmiş GIF dosyası olarak kaydeder.
-    Adaptive color quantization ve delta compression uygulayarak dosya boyutunu %75-85 düşürür.
+    Saves frame sequence as a highly-optimized web GIF.
+    Applies adaptive color quantization and delta compression to minimize file size.
     """
     if not frames:
         return
     try:
         from PIL import Image
         pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
-        # Web/GitHub Camo için adaptive palette quantization (hızlı yükleme ve yüksek kontrast)
+        # Adaptive palette quantization for fast web loading and high contrast
         quantized = [f.quantize(colors=colors, method=Image.Quantize.MEDIANCUT) for f in pil_frames]
         duration = int(1000.0 / fps)
         quantized[0].save(
@@ -273,16 +274,16 @@ def save_demo_gif(
             optimize=True,
         )
         file_size_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
-        print(f"[✓] Demo GIF başarıyla oluşturuldu: {output_path} ({file_size_mb:.2f} MB, {fps:.1f} FPS)")
+        print(f"[✓] Demo GIF successfully created: {output_path} ({file_size_mb:.2f} MB, {fps:.1f} FPS)")
     except Exception as e:
-        print(f"[!] PIL optimizasyonu başarısız ({e}), imageio fallback deneniyor...")
+        print(f"[!] PIL optimization warning ({e}), falling back to imageio...")
         try:
             import imageio
             rgb_frames = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames]
             imageio.mimsave(output_path, rgb_frames, fps=fps, loop=0)
-            print(f"[✓] Demo GIF başarıyla oluşturuldu: {output_path}")
+            print(f"[✓] Demo GIF successfully created: {output_path}")
         except ImportError:
-            print("[!] imageio bulunamadı, GIF yerine MP4 olarak kaydediliyor...")
+            print("[!] imageio not found, falling back to MP4 export...")
             save_demo_video(frames, output_path.replace(".gif", ".mp4"), fps=fps)
 
 
@@ -292,7 +293,7 @@ def save_demo_video(
     fps: float = 20.0,
 ) -> None:
     """
-    Kare listesini MP4 video olarak kaydeder.
+    Saves frame sequence as an MP4 video file.
     """
     if not frames:
         return
@@ -302,4 +303,4 @@ def save_demo_video(
     for f in frames:
         out.write(f)
     out.release()
-    print(f"[✓] Demo video başarıyla kaydedildi: {output_path}")
+    print(f"[✓] Demo video successfully saved: {output_path}")

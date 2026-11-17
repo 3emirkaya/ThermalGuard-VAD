@@ -16,7 +16,7 @@ def test_anomaly_scorer():
     orig = np.zeros((128, 160), dtype=np.float32)
     recon = np.zeros((128, 160), dtype=np.float32)
 
-    # Sıcak anomali hedefi yerleştir
+    # Inject synthetic hot intruder target
     orig[50:65, 70:85] = 0.85
 
     error_map = scorer.compute_error_map(orig, recon)
@@ -39,7 +39,7 @@ def test_streaming_inference_pipeline():
 
     raw_frame = np.random.randint(40, 160, (240, 320), dtype=np.uint8)
 
-    # 5 ardışık kare gönder (buffer dolumu ve çıkarım testi)
+    # Ingest 5 consecutive frames (tests buffer warm-up and streaming inference)
     for _ in range(5):
         res = engine.step(raw_frame)
         assert res.preprocessed.shape == (48, 64)
@@ -60,7 +60,7 @@ def test_perimeter_simulator_and_hud_rendering():
     assert masks[10].sum() > 0
     assert masks[0].sum() == 0
 
-    # Dashboard görselleştirici testi
+    # Dashboard visualizer integration test
     viz = DashboardVisualizer(width=320, height=260, graph_height=80)
     model = build_model({"widths": (16, 32), "latent": 16, "lstm_hidden": (16,)})
     prep = ThermalPreprocessor(ThermalPreprocessConfig(output_size=(80, 60)))

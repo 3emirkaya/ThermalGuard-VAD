@@ -1,14 +1,15 @@
 """
-Saha koşulu simülatörü — termal sensör bozulmaları.
+Field condition simulator — thermal sensor degradation models.
 
-Gerçek sahada (sınır hattı, gece, sis, yağmur, ucuz/sıcak kamera) LWIR görüntüsü
-eğitim verisinden çok daha kötü olabilir. Bu modül kontrollü bozulmalar ekleyerek:
+In real-world deployment (border perimeter, nocturnal, fog, rain, low-cost uncooled microbolometers),
+LWIR imagery can be significantly worse than pristine training datasets. This module injects
+controlled degradations to support:
 
-1. Eğitimde **artırım (augmentation)** — modelin gürültüye karşı sağlamlığı,
-2. Değerlendirmede **dayanıklılık (robustness) testi** — "ön işleme açık / kapalı"
-   AUROC karşılaştırması
+1. Training **augmentation** — enhances model robustness against sensor noise.
+2. Evaluation **stress testing** — enables rigorous "preprocessing ON vs. OFF"
+   AUROC benchmarking under severe atmospheric and hardware degradation.
 
-yapmayı sağlar. Tüm parametreler 8-bit uint8 ölçeğindedir.
+All parameters operate in the standard 8-bit [0, 255] domain.
 """
 from __future__ import annotations
 
@@ -19,16 +20,16 @@ import numpy as np
 
 @dataclass
 class DegradationConfig:
-    contrast: float = 1.0        # <1 → düşük kontrast (sis, termal geçiş saatleri / "thermal crossover")
-    brightness: float = 0.0      # ofset (8-bit)
-    gauss_sigma: float = 0.0     # zamansal gürültü (NETD) std, 8-bit
-    stripe_sigma: float = 0.0    # sütun FPN std
-    dead_rate: float = 0.0       # ölü/sıcak piksel oranı
+    contrast: float = 1.0        # < 1 -> low contrast (fog, thermal crossover hours)
+    brightness: float = 0.0      # offset (8-bit)
+    gauss_sigma: float = 0.0     # temporal noise (NETD) std, 8-bit
+    stripe_sigma: float = 0.0    # column fixed pattern noise (FPN) std
+    dead_rate: float = 0.0       # dead/hot pixel defect ratio
     seed: int | None = None
 
     @classmethod
     def level(cls, k: int, seed: int | None = None) -> "DegradationConfig":
-        """0 (temiz) … 4 (çok ağır) arası hazır seviyeler."""
+        """Predefined severity levels from 0 (clean) to 4 (severe)."""
         presets = [
             dict(),
             dict(contrast=0.6, gauss_sigma=3, stripe_sigma=1.5, dead_rate=1e-4),
@@ -40,7 +41,7 @@ class DegradationConfig:
 
 
 class ThermalDegrader:
-    """Kareye LWIR'e özgü bozulmalar uygular. FPN deseni sekans boyunca sabittir (gerçekçi)."""
+    """Applies LWIR sensor degradation to frames. FPN stripe patterns remain fixed across a sequence."""
 
     def __init__(self, cfg: DegradationConfig):
         self.cfg = cfg

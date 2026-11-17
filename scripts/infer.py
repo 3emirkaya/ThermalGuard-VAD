@@ -1,18 +1,18 @@
 """
-ThermalGuard-VAD — Gerçek Zamanlı Çıkarım (Real-Time Inference) ve Demo Üretici.
+ThermalGuard-VAD — Real-Time Inference and Demonstration Generator.
 
-Özellikler:
-  * Giriş Kaynağı: KAIST sekansı, video dosyası, görüntü klasörü veya
-    tamamen gömülü Sınır Güvenliği Simülasyonu (--synthetic).
-  * Çıktı: Taktiksel savunma ve sınır güvenliği için üstte akan anomali grafiği,
-    altta ısı haritası içeren demo.gif / demo.mp4 üretir.
-  * Uçtan uca kenar cihaz telemetrisi (FPS, ms/kare).
+Features:
+  * Input Sources: KAIST sequences, video files, image folders, or
+    fully embedded physical thermal perimeter simulations (--synthetic).
+  * Output: Renders dual-panel tactical security HUD with top real-time anomaly score graph
+    and bottom colorized thermal anomaly heatmap (demo.gif / demo.mp4).
+  * End-to-end edge telemetry (latency in ms, FPS throughput).
 
-Kullanım:
-    # 1. Anında Çalışan Bağımsız Demo (Zero-Dependency Synthetic Defense Scenario):
+Usage:
+    # 1. Zero-dependency synthetic defense scenario:
     python scripts/infer.py --synthetic --gif demo.gif
 
-    # 2. KAIST Verisi ile Çıkarım:
+    # 2. KAIST sequence inference:
     python scripts/infer.py --source data/kaist_survey/images/set00/V000/lwir --gif demo.gif
 """
 from __future__ import annotations
@@ -22,8 +22,9 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Tuple
 
-# Windows cp1252 terminal uyumluluğu
+# Windows cp1252 terminal compatibility
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -36,7 +37,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-# Proje kökünü sys.path'e ekle
+# Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from thermalguard.data.sources import FrameSource
@@ -81,14 +82,14 @@ def load_or_init_model(weights_path: str, device: torch.device) -> Tuple[STAE, d
     }
     has_weights = os.path.isfile(weights_path)
     if has_weights:
-        print(f"[✓] Model ağırlıkları yükleniyor: {weights_path}")
+        print(f"[✓] Loading model weights: {weights_path}")
         ckpt = torch.load(weights_path, map_location=device, weights_only=False)
         model_cfg = ckpt.get("model_cfg", default_cfg)
         model = build_model(model_cfg)
         model.load_state_dict(ckpt["model_state"])
         prep_cfg_dict = ckpt.get("prep_cfg", {})
     else:
-        print(f"[!] Belirtilen ağırlık dosyası bulunamadı ({weights_path}), yeni model başlatılıyor...")
+        print(f"[!] Checkpoint not found ({weights_path}), initializing architecture...")
         model = build_model(default_cfg)
         prep_cfg_dict = {}
 
@@ -100,11 +101,11 @@ def load_or_init_model(weights_path: str, device: torch.device) -> Tuple[STAE, d
 def main():
     args = parse_args()
 
-    # 1. Cihaz Belirleme
+    # 1. Device Selection
     device = torch.device(args.device) if args.device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[i] Çıkarım Cihazı: {device}")
+    print(f"[i] Inference Device: {device}")
 
-    # 2. Model ve Ön İşleme
+    # 2. Model and Preprocessor Setup
     model, saved_prep, has_weights = load_or_init_model(args.weights, device)
 
     prep_cfg = ThermalPreprocessConfig.from_dict(saved_prep) if saved_prep else ThermalPreprocessConfig()
@@ -112,7 +113,7 @@ def main():
         prep_cfg.clahe = False
     preprocessor = ThermalPreprocessor(prep_cfg)
 
-    # 3. Anomali Motoru ve Gösterge Paneli
+    # 3. Anomaly Scoring and Dashboard HUD
     scorer = AnomalyScorer(AnomalyScoreConfig(percentile=99.2, temporal_smoothing=0.6))
     engine = StreamingInferenceEngine(
         model=model,
@@ -131,7 +132,7 @@ def main():
         threshold=args.threshold,
     )
 
-    # 3b. Olay Kaydı (EventLogger) + LLM Özet (LLMSummarizer)
+    # 3b. Event Logging (EventLogger) + LLM Incident Summaries (LLMSummarizer)
     summarizer = LLMSummarizer(
         backend=args.llm,
         model=args.llm_model or None,

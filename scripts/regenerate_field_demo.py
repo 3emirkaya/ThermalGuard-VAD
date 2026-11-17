@@ -158,7 +158,7 @@ def main():
         cv2.putText(hud_bar, telemetry, (12, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.37, (180, 190, 200), 1, cv2.LINE_AA)
 
-        # Parlak canlı neon yeşil (STATUS: PERIMETER SECURE)
+        # Vivid neon green (STATUS: PERIMETER SECURE)
         state_color = (40, 50, 255) if is_anomaly else (40, 245, 60)
         state_label = "ALARM: ANOMALY DETECTED" if is_anomaly else "STATUS: PERIMETER SECURE"
         cv2.putText(hud_bar, state_label, (viz.width - 220, 22),

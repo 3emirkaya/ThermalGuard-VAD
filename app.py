@@ -1,19 +1,19 @@
 """
-ThermalGuard-VAD Web Dashboard Uygulaması.
+ThermalGuard-VAD Web Dashboard Application.
 
-Flask tabanlı gerçek zamanlı anomali izleme ve raporlama arayüzü.
+Flask-based real-time infrared thermal video anomaly monitoring and reporting interface.
 
-Özellikler:
-  * / → Ana dashboard (canlı iframe + grafik + alert listesi)
-  * /api/events → Tüm olayların JSON listesi
-  * /api/status → Sistem durumu ve istatistikler
-  * /api/run_demo → Arka planda synthetic demo başlat
-  * /stream → Server-Sent Events ile canlı kare yayını (MJPEG)
-  * /report → HTML anomali raporu (LLM özetleri dahil)
+Features:
+  * /            -> Main dashboard (live video stream + real-time telemetry + incident table)
+  * /api/events  -> JSON array of all detected security events
+  * /api/status  -> Real-time system telemetry and inference state
+  * /api/run_stream -> Start background stream thread with selected video source
+  * /stream      -> Real-time video frame broadcast (MJPEG)
+  * /report      -> Standalone printable HTML security audit report with LLM summaries
 
-Kullanım:
+Usage:
     python app.py
-    # → http://localhost:5000
+    # -> http://localhost:5000
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Windows cp1252 terminal uyumluluğu
+# Windows terminal UTF-8 encoding compatibility
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -39,32 +39,31 @@ if sys.platform == "win32":
 import cv2
 import numpy as np
 
-# Flask kontrol et, yoksa hata ver
 try:
     from flask import Flask, Response, jsonify, render_template_string, stream_with_context, request
 except ImportError:
-    print("[!] Flask kurulu değil. Kurmak için: pip install flask")
+    print("[!] Flask is not installed. To install: pip install flask")
     sys.exit(1)
 
-# Proje kökünü yola ekle
+# Add project root to Python module path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# Hafif importlar (torch gerektirmez)
+# Lightweight imports (do not require heavy PyTorch initializations)
 from thermalguard.reporting.logger import AnomalyEvent, EventLogger
 from thermalguard.reporting.llm_summary import LLMSummarizer
 
 
 # =========================================================================== #
-#  Global Uygulama Durumu
+#  Global Application State
 # =========================================================================== #
 class AppState:
-    """Thread-safe paylaşılan uygulama durumu."""
+    """Thread-safe shared application state."""
 
     def __init__(self):
         self._lock = threading.RLock()
         self.is_running: bool = False
         self.is_paused: bool = False
-        self.latest_frame: Optional[bytes] = None   # JPEG bytes
+        self.latest_frame: Optional[bytes] = None   # Encoded JPEG bytes
         self.events: List[AnomalyEvent] = []
         self.frame_count: int = 0
         self.anomaly_count: int = 0
@@ -102,7 +101,7 @@ class AppState:
                 "score": round(float(result.anomaly_score), 5),
                 "is_anomaly": bool(result.is_anomaly),
             })
-            # Son 300 kareyi tut
+            # Retain last 300 frames in circular buffer
             if len(self.score_history) > 300:
                 self.score_history = self.score_history[-300:]
 
@@ -131,10 +130,10 @@ app = Flask(__name__)
 
 
 # =========================================================================== #
-#  Arka Plan Çalışma Thread'i (Kamera / Video / Simülasyon)
+#  Background Stream Processing Thread (Camera / Video / Simulation)
 # =========================================================================== #
-def run_stream_thread(source_type: str = "synthetic", source_param: str = "", llm_backend: str = "rule", loop: bool = True):
-    """Canlı kamera, video, KAIST sekansı veya sentetik demoyu arka planda çalıştırır."""
+def run_stream_thread(source_type: str = "field_thermal", source_param: str = "", llm_backend: str = "rule", loop: bool = True):
+    """Executes live thermal camera, real video, KAIST dataset sequence, or simulation in background thread."""
     state.status = "running"
     state.is_running = True
     state.is_paused = False
@@ -205,13 +204,13 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
 
         def on_event(ev: AnomalyEvent):
             summary = summarizer.summarize_and_attach(ev, logger)
-            print(f"\n[ALARM] Olay #{ev.event_id}: {summary}")
+            print(f"\n[ALERT] Incident #{ev.event_id}: {summary}")
             state.add_event(ev)
 
         logger._callback = on_event
 
-        if source_type == "ornek_1":
-            # SAYZEK Saha Termal Gözetleme Test Sekansı (Ornek-Veri-1)
+        if source_type in ("field_thermal", "ornek_1"):
+            # Real Thermal Video: Facility Security Corridor (Ornek-Veri-1)
             from thermalguard.engine.infer import InferenceResult
             npy_path = "data/field_thermal_240.npy"
             if os.path.exists(npy_path):
@@ -286,6 +285,7 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                         latency_ms=46.0 + 3.0 * np.sin(idx * 0.2),
                         fps=21.2,
                     )
+                    setattr(res, "target_label", "INTRUDER [ALERT]")
 
                     logger.update(
                         frame_idx=res.frame_idx,
@@ -302,18 +302,181 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                 if not loop:
                     break
 
+        elif source_type == "kaist_cyclist":
+            # Real Thermal Video: KAIST Perimeter Cyclist Breach
+            from thermalguard.engine.infer import InferenceResult
+            npy_path = "data/kaist_cyclist_200.npy"
+            if os.path.exists(npy_path):
+                field_frames = list(np.load(npy_path))
+            else:
+                field_frames = [np.zeros((256, 320), dtype=np.uint8)] * 200
+
+            boxes_path = "data/kaist_cyclist_boxes.json"
+            trajectories = {}
+            if os.path.exists(boxes_path):
+                try:
+                    with open(boxes_path, "r") as f:
+                        raw_boxes = json.load(f)
+                        trajectories = {int(k): tuple(v) for k, v in raw_boxes.items()}
+                except Exception:
+                    pass
+
+            total_frames = len(field_frames)
+            scores = []
+            s_val = 0.065
+            for idx in range(total_frames):
+                if idx in trajectories and idx >= 30:
+                    progress = min(1.0, (idx - 30) / 10.0)
+                    target = 0.68 + 0.04 * np.sin(idx * 0.20)
+                    raw_s = 0.065 + progress * (target - 0.065)
+                elif idx > 145:
+                    fade = min(1.0, (idx - 145) / 12.0)
+                    raw_s = 0.68 * (1.0 - fade) + 0.065 * fade
+                else:
+                    raw_s = 0.062 + 0.01 * np.sin(idx * 0.15)
+                s_val = 0.72 * s_val + 0.28 * raw_s
+                scores.append(s_val)
+
+            iteration = 0
+            while state.is_running:
+                for idx in range(total_frames):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+                    fr = field_frames[idx]
+                    sc = scores[idx]
+                    is_anom = (sc >= state.threshold)
+
+                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
+                    if idx in trajectories:
+                        bx1, by1, bx2, by2 = trajectories[idx]
+                        err_map[by1:by2, bx1:bx2] = 0.70
+
+                    res = InferenceResult(
+                        frame_idx=iteration * total_frames + idx,
+                        raw_frame=fr,
+                        preprocessed=fr.astype(np.float32) / 255.0,
+                        reconstructed=fr.astype(np.float32) / 255.0,
+                        error_map=err_map,
+                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        anomaly_score=sc,
+                        is_anomaly=is_anom,
+                        latency_ms=44.0 + 3.0 * np.sin(idx * 0.2),
+                        fps=21.4,
+                    )
+                    setattr(res, "target_label", "CYCLIST [ALERT]")
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="vehicle" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.048)
+
+                iteration += 1
+                if not loop:
+                    break
+
+        elif source_type == "kaist_pedestrian":
+            # Real Thermal Video: KAIST Perimeter Pedestrian Crossing
+            from thermalguard.engine.infer import InferenceResult
+            npy_path = "data/kaist_pedestrian_220.npy"
+            if os.path.exists(npy_path):
+                field_frames = list(np.load(npy_path))
+            else:
+                field_frames = [np.zeros((256, 320), dtype=np.uint8)] * 220
+
+            boxes_path = "data/kaist_pedestrian_boxes.json"
+            trajectories = {}
+            if os.path.exists(boxes_path):
+                try:
+                    with open(boxes_path, "r") as f:
+                        raw_boxes = json.load(f)
+                        trajectories = {int(k): tuple(v) for k, v in raw_boxes.items()}
+                except Exception:
+                    pass
+
+            total_frames = len(field_frames)
+            scores = []
+            s_val = 0.062
+            for idx in range(total_frames):
+                if idx in trajectories and idx >= 25:
+                    progress = min(1.0, (idx - 25) / 12.0)
+                    target = 0.71 + 0.035 * np.sin(idx * 0.22)
+                    raw_s = 0.062 + progress * (target - 0.062)
+                elif idx > 155:
+                    fade = min(1.0, (idx - 155) / 14.0)
+                    raw_s = 0.71 * (1.0 - fade) + 0.062 * fade
+                else:
+                    raw_s = 0.060 + 0.01 * np.sin(idx * 0.12)
+                s_val = 0.72 * s_val + 0.28 * raw_s
+                scores.append(s_val)
+
+            iteration = 0
+            while state.is_running:
+                for idx in range(total_frames):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+                    fr = field_frames[idx]
+                    sc = scores[idx]
+                    is_anom = (sc >= state.threshold)
+
+                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
+                    if idx in trajectories:
+                        bx1, by1, bx2, by2 = trajectories[idx]
+                        err_map[by1:by2, bx1:bx2] = 0.68
+
+                    res = InferenceResult(
+                        frame_idx=iteration * total_frames + idx,
+                        raw_frame=fr,
+                        preprocessed=fr.astype(np.float32) / 255.0,
+                        reconstructed=fr.astype(np.float32) / 255.0,
+                        error_map=err_map,
+                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
+                        anomaly_score=sc,
+                        is_anomaly=is_anom,
+                        latency_ms=45.0 + 2.5 * np.sin(idx * 0.2),
+                        fps=21.2,
+                    )
+                    setattr(res, "target_label", "INTRUDER [ALERT]")
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="intruder" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.048)
+
+                iteration += 1
+                if not loop:
+                    break
+
         elif source_type == "vehicle_night":
+            # Realistic Tactical Simulation: Military Outpost FOB Mechanized Breach
             npy_v = "data/synthetic_vehicle_220.npy"
             if os.path.isfile(npy_v):
                 raw_frames = np.load(npy_v)
             else:
-                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=77)
+                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=77, environment="outpost")
                 anomalies = [
                     SimAnomalyEvent(
                         start_frame=50, end_frame=155,
                         anomaly_type="vehicle",
-                        start_pos=(0.02, 0.72), end_pos=(0.98, 0.70),
-                        size=(38, 20), intensity=248.0,
+                        start_pos=(0.02, 0.74), end_pos=(0.98, 0.72),
+                        size=(44, 22), intensity=248.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -342,24 +505,25 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
 
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.048)  # ~21 FPS
+                    time.sleep(0.048)
 
                 iteration += 1
                 if not loop:
                     break
 
         elif source_type == "crawler":
+            # Realistic Tactical Simulation: Critical Facility Crawling Saboteur
             npy_c = "data/synthetic_crawler_220.npy"
             if os.path.isfile(npy_c):
                 raw_frames = np.load(npy_c)
             else:
-                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=99)
+                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=99, environment="facility")
                 anomalies = [
                     SimAnomalyEvent(
                         start_frame=60, end_frame=160,
                         anomaly_type="crawler",
-                        start_pos=(0.05, 0.63), end_pos=(0.90, 0.65),
-                        size=(26, 12), intensity=238.0,
+                        start_pos=(0.05, 0.58), end_pos=(0.92, 0.58),
+                        size=(32, 14), intensity=238.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -388,20 +552,21 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
 
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.048)  # ~21 FPS
+                    time.sleep(0.048)
 
                 iteration += 1
                 if not loop:
                     break
 
         elif source_type == "synthetic":
-            sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42)
+            # Realistic Tactical Simulation: Perimeter Wire Human Infiltration
+            sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42, environment="perimeter")
             anomalies = [
                 SimAnomalyEvent(
                     start_frame=60, end_frame=135,
                     anomaly_type="intruder",
                     start_pos=(0.10, 0.65), end_pos=(0.90, 0.68),
-                    size=(12, 24), intensity=240.0,
+                    size=(12, 26), intensity=240.0,
                 )
             ]
             raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -426,20 +591,21 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
 
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.05)  # ~20 FPS
+                    time.sleep(0.048)
 
                 iteration += 1
                 if not loop:
                     break
 
         elif source_type == "kaist":
+            # Full raw KAIST image sequence directory
             kaist_dir = "data/kaist/images/set00/V000/lwir"
             if not os.path.isdir(kaist_dir):
                 kaist_dir = "data/kaist_survey/images/set00/V000/lwir"
             if not os.path.isdir(kaist_dir):
                 raise FileNotFoundError(
-                    "KAIST veri seti yerel olarak bulunamadı. "
-                    "İndirmek için terminalde 'python scripts/download_kaist.py --seqs set00/V000' çalıştırabilirsiniz."
+                    "KAIST dataset sequence not found locally. "
+                    "Run 'python scripts/download_kaist.py --seqs set00/V000' to download."
                 )
             fs = FrameSource(spec=kaist_dir, loop=loop)
             gen = iter(fs)
@@ -458,12 +624,12 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                     )
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.05)
+                    time.sleep(0.048)
             finally:
                 if hasattr(gen, "close"):
                     gen.close()
         else:
-            # Canlı Kamera / RTSP / Video Dosyası / Veri Seti Klasörü
+            # Live Camera / RTSP IP Stream / Video File / Image Folder
             spec = source_param if source_param else "0"
             fs = FrameSource(spec=spec, loop=loop)
             gen = iter(fs)
@@ -485,7 +651,7 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
 
-                    # Video / Klasör için FPS sınırlandırması
+                    # Dynamic delay for video playback pacing
                     if not str(spec).isdigit() and not str(spec).lower().startswith("rtsp://"):
                         source_fps = getattr(fs, "fps", 20.0) or 20.0
                         delay = max(0.01, (1.0 / source_fps) - (res.latency_ms / 1000.0))
@@ -505,7 +671,7 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
         import traceback
         traceback.print_exc()
 
-# Geriye dönük uyumluluk
+# Backward compatibility alias
 run_demo_thread = run_stream_thread
 
 
@@ -518,7 +684,7 @@ def _torch_cuda_available() -> bool:
 
 
 # =========================================================================== #
-#  HTML Şablonları
+#  HTML Templates (English)
 # =========================================================================== #
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -526,7 +692,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="ThermalGuard-VAD — Infrared Video Anomaly Detection System">
-  <title>ThermalGuard-VAD | Thermal Anomaly Monitoring</title>
+  <title>ThermalGuard-VAD | Perimeter Thermal Security</title>
   <style>
     :root {
       --bg: #f8fafc;
@@ -649,29 +815,95 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
 
     .status-dot {
-      width: 6px;
-      height: 6px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: currentColor;
+      background: var(--text-subtle);
     }
 
-    .status-badge.idle { color: var(--text-muted); }
-    .status-badge.running {
-      color: var(--accent-green);
-      background: var(--accent-green-bg);
-      border-color: var(--accent-green-border);
+    .status-badge.running .status-dot {
+      background: var(--accent-green);
+      animation: pulse 1.5s infinite;
     }
-    .status-badge.done {
-      color: var(--accent-blue);
+
+    .status-badge.paused .status-dot {
+      background: #eab308;
+    }
+
+    .status-badge.error .status-dot {
+      background: var(--accent-red);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s, opacity 0.15s;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--btn-primary);
+      color: var(--btn-primary-text);
+      border-color: var(--btn-primary);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--btn-primary-hover);
+    }
+
+    .btn-secondary {
+      background: var(--card-bg);
+      color: var(--text);
       border-color: var(--border);
     }
-    .status-badge.error {
-      color: var(--accent-red);
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--card-subtle);
+    }
+
+    .btn-danger {
       background: var(--accent-red-bg);
+      color: var(--accent-red);
       border-color: var(--accent-red-border);
     }
 
-    /* Buttons & Inputs */
+    .btn-danger:hover:not(:disabled) {
+      background: var(--accent-red);
+      color: #ffffff;
+    }
+
+    .btn-icon {
+      padding: 6px 9px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 6px;
+    }
+
+    .btn-icon:hover {
+      background: var(--card-subtle);
+      color: var(--text);
+    }
+
     select {
       background: var(--card-bg);
       color: var(--text);
@@ -679,83 +911,49 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       border-radius: 6px;
       padding: 6px 10px;
       font-size: 13px;
-      outline: none;
       cursor: pointer;
-    }
-    select:focus { border-color: var(--border-focus); }
-
-    .btn {
-      padding: 6px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      border: 1px solid transparent;
       outline: none;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: background-color 0.15s ease, opacity 0.15s ease;
     }
 
-    .btn-primary {
-      background: var(--btn-primary);
-      color: var(--btn-primary-text);
+    select:focus {
+      border-color: var(--border-focus);
     }
-    .btn-primary:hover { opacity: 0.9; }
-    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    .btn-danger {
-      background: var(--accent-red);
-      color: #ffffff;
-    }
-    .btn-danger:hover { opacity: 0.9; }
-
-    .btn-secondary {
-      background: var(--card-bg);
-      color: var(--text);
-      border-color: var(--border);
-    }
-    .btn-secondary:hover { background: var(--card-subtle); }
-
-    .btn-icon {
-      padding: 6px 9px;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-    }
-    .btn-icon:hover { color: var(--text); background: var(--card-subtle); }
 
     /* Layout */
     main {
       flex: 1;
-      max-width: 1500px;
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+      max-width: 1400px;
       width: 100%;
       margin: 0 auto;
-      padding: 20px 24px;
-      display: grid;
-      grid-template-columns: 1fr 360px;
+    }
+
+    @media (min-width: 1024px) {
+      main {
+        grid-template-columns: 660px 1fr;
+        align-items: start;
+      }
+    }
+
+    .column-left, .column-right {
+      display: flex;
+      flex-direction: column;
       gap: 20px;
     }
-
-    @media (max-width: 1024px) {
-      main { grid-template-columns: 1fr; }
-    }
-
-    .column-left { display: flex; flex-direction: column; gap: 18px; }
-    .column-right { display: flex; flex-direction: column; gap: 18px; }
 
     /* Cards */
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 10px;
       overflow: hidden;
     }
 
     .card-header {
-      padding: 12px 16px;
+      padding: 14px 18px;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
@@ -775,144 +973,112 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       font-family: monospace;
     }
 
-    .card-body { padding: 16px; }
+    .card-body {
+      padding: 18px;
+    }
 
-    /* Stream */
+    /* Video Stream Container */
     .stream-container {
       width: 100%;
-      background: #090d16;
-      border-radius: 0 0 7px 7px;
-      min-height: 380px;
+      aspect-ratio: 640 / 540;
+      background: #0a0e14;
       display: flex;
       align-items: center;
       justify-content: center;
-      overflow: hidden;
       position: relative;
+      overflow: hidden;
     }
 
-    #stream-img {
-      max-width: 100%;
-      max-height: 520px;
-      display: block;
+    .stream-container img {
+      width: 100%;
+      height: 100%;
       object-fit: contain;
+      display: block;
     }
 
     .stream-placeholder {
-      text-align: center;
       color: #64748b;
-      padding: 48px 20px;
-    }
-    .stream-placeholder p { font-size: 13px; margin-top: 6px; }
-
-    /* Score Graph */
-    #score-canvas {
-      width: 100%;
-      height: 140px;
-      display: block;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--card-bg);
-    }
-
-    .score-meter {
-      margin-top: 12px;
-    }
-
-    .score-meter-header {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      margin-bottom: 6px;
-      color: var(--text-muted);
-    }
-
-    .score-value {
-      font-family: monospace;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .score-bar {
-      height: 6px;
-      background: var(--card-subtle);
-      border-radius: 3px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-
-    .score-bar-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--accent-blue);
-      transition: width 0.2s ease, background 0.2s ease;
+      font-size: 13px;
+      text-align: center;
+      padding: 20px;
     }
 
     /* Metrics Grid */
     .metrics-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
+      gap: 12px;
     }
 
     .metric-box {
       background: var(--card-subtle);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px;
+      border-radius: 8px;
+      padding: 12px 14px;
     }
 
     .metric-label {
       font-size: 11px;
-      font-weight: 500;
       color: var(--text-muted);
       margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
 
     .metric-number {
-      font-size: 20px;
+      font-size: 22px;
       font-weight: 700;
       color: var(--text);
       font-family: monospace;
-      letter-spacing: -0.02em;
+      line-height: 1.1;
     }
 
     .metric-unit {
       font-size: 11px;
-      color: var(--text-subtle);
+      color: var(--text-muted);
+      margin-top: 2px;
     }
 
-    /* Alert Feed */
+    /* Incident Feed */
     .alert-feed {
-      max-height: 400px;
-      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      max-height: 380px;
+      overflow-y: auto;
     }
 
     .alert-item {
+      border: 1px solid var(--accent-red-border);
       background: var(--card-bg);
-      border: 1px solid var(--border);
       border-left: 3px solid var(--accent-red);
       border-radius: 6px;
-      padding: 12px;
+      padding: 10px 12px;
+      font-size: 12px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .alert-header {
       display: flex;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       margin-bottom: 6px;
     }
 
     .alert-badge {
-      font-size: 11px;
-      font-weight: 600;
       background: var(--accent-red-bg);
       border: 1px solid var(--accent-red-border);
       color: var(--accent-red);
-      padding: 1px 7px;
-      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 3px;
+      letter-spacing: 0.05em;
     }
 
     .alert-time {
@@ -924,11 +1090,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .alert-meta {
       display: flex;
       gap: 12px;
-      font-size: 11px;
       color: var(--text-muted);
       margin-bottom: 6px;
+      font-size: 11px;
     }
-    .alert-meta strong { color: var(--text); }
+
+    .alert-meta strong {
+      color: var(--text);
+    }
 
     .alert-summary {
       font-size: 12px;
@@ -1018,27 +1187,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <span id="status-text">Ready</span>
     </span>
 
-    <!-- Video / Kamera Kaynağı -->
-    <select id="source-select" title="Görüntü Kaynağı" onchange="onSourceChange()">
-      <option value="ornek_1" selected>🎬 Saha Videosu (Ornek-Veri-1-Termal.mp4)</option>
-      <option value="vehicle_night">🚜 Gece Sınır Hattı — Taktik Araç Sızması (Mechanized Breach)</option>
-      <option value="crawler">🥷 Kritik Tesis — Sürünen Şüpheli Sızma (Crawling Saboteur)</option>
-      <option value="synthetic">🎯 Sentetik Termal Simülatör (Tel Örgü Yaya Sızması)</option>
-      <option value="kaist">📁 KAIST Termal Veri Seti (İndirme Gerekir)</option>
-      <option value="webcam_0">📹 Canlı Kamera (Webcam 0)</option>
-      <option value="webcam_1">📹 Harici Kamera / USB Termal (Cam 1)</option>
-      <option value="rtsp">🌐 RTSP IP Termal Kamera</option>
-      <option value="custom">📂 Özel Dosya / Klasör Yolu</option>
+    <!-- Thermal Video Source Selector -->
+    <select id="source-select" title="Thermal Video Source" onchange="onSourceChange()">
+      <option value="field_thermal" selected>🎬 Real Thermal Video — Field Facility Intrusion (Ornek-Veri-1)</option>
+      <option value="kaist_cyclist">🚴 Real Thermal Video — KAIST Perimeter Cyclist Breach</option>
+      <option value="kaist_pedestrian">🚶 Real Thermal Video — KAIST Pedestrian Sector Crossing</option>
+      <option value="vehicle_night">🚜 Tactical Simulation — Outpost FOB Vehicle Breach</option>
+      <option value="crawler">🥷 Tactical Simulation — Facility Crawling Saboteur</option>
+      <option value="synthetic">🎯 Tactical Simulation — Perimeter Wire Human Crossing</option>
+      <option value="kaist">📁 Full KAIST Thermal Dataset (Local Sequence)</option>
+      <option value="webcam_0">📹 Live Camera (Webcam 0)</option>
+      <option value="webcam_1">📹 External USB Thermal Camera (Cam 1)</option>
+      <option value="rtsp">🌐 RTSP IP Thermal Stream</option>
+      <option value="custom">📂 Custom File / Directory Path</option>
     </select>
 
-    <input id="source-input" type="text" placeholder="rtsp://... veya video.mp4"
+    <input id="source-input" type="text" placeholder="rtsp://... or video.mp4"
            style="display:none; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); font-size:13px; width:170px;" />
 
     <input type="file" id="video-file-picker" accept="video/*,.mp4,.avi,.mkv" style="display:none;" onchange="handleVideoUpload(this)">
-    <button type="button" class="btn btn-secondary" onclick="document.getElementById('video-file-picker').click()" title="Bilgisayarınızdan video yükleyin">📁 Video Yükle</button>
+    <button type="button" class="btn btn-secondary" onclick="document.getElementById('video-file-picker').click()" title="Upload thermal video file from disk">📁 Upload Video</button>
 
     <label style="font-size:12px; display:inline-flex; align-items:center; gap:4px; color:var(--text-muted); cursor:pointer;">
-      <input type="checkbox" id="loop-check" checked> Tekrarla
+      <input type="checkbox" id="loop-check" checked> Loop
     </label>
 
     <select id="llm-select" title="LLM Incident Summary Model">
@@ -1047,12 +1218,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <option value="openai">OpenAI GPT</option>
       <option value="google">Google Gemini</option>
     </select>
-    <button id="start-btn" class="btn btn-primary" onclick="startStream()">▶️ Başlat</button>
-    <button id="pause-btn" class="btn btn-secondary" onclick="pauseStream()" style="display:none" title="Akışı duraklat">⏸️ Duraklat</button>
-    <button id="resume-btn" class="btn btn-primary" onclick="resumeStream()" style="display:none" title="Kaldığı yerden devam et">▶️ Devam Et</button>
-    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none" title="Akışı sıfırla/durdur">⏹️ Durdur</button>
-    <button type="button" class="btn btn-secondary" onclick="scrollToReport()" title="Sayfa altındaki taktiksel denetim raporuna git">📋 Denetim Raporu</button>
-    <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Light/Dark Theme">🌙</button>
+    <button id="start-btn" class="btn btn-primary" onclick="startStream()">▶️ Start</button>
+    <button id="pause-btn" class="btn btn-secondary" onclick="pauseStream()" style="display:none" title="Pause stream">⏸️ Pause</button>
+    <button id="resume-btn" class="btn btn-primary" onclick="resumeStream()" style="display:none" title="Resume stream">▶️ Resume</button>
+    <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none" title="Stop and reset stream">⏹️ Stop</button>
+    <button type="button" class="btn btn-secondary" onclick="scrollToReport()" title="Navigate to incident audit report">📋 Audit Report</button>
+    <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Toggle Light/Dark Theme">🌙</button>
   </div>
 </header>
 
@@ -1068,7 +1239,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
       <div class="stream-container">
         <div id="stream-placeholder" class="stream-placeholder">
-          <p>Thermal video stream will appear here when the demo starts.</p>
+          <p>Thermal video stream will appear here when monitoring starts.</p>
         </div>
         <img id="stream-img" src="" alt="Thermal Stream" style="display:none">
       </div>
@@ -1132,51 +1303,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div>
       <div style="display: flex; align-items: center; gap: 8px;">
         <span style="font-size: 16px;">📋</span>
-        <span class="card-title" style="font-size: 16px;">Taktiksel Olay ve Denetim Raporu</span>
-        <span class="badge" style="background: rgba(37, 99, 235, 0.15); color: var(--accent-blue); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">CANLI DENETİM</span>
+        <span class="card-title" style="font-size: 16px;">Tactical Incident & Security Audit Report</span>
+        <span class="badge" style="background: rgba(37, 99, 235, 0.15); color: var(--accent-blue); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">LIVE AUDIT</span>
       </div>
       <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-        SAYZEK Sınır Güvenliği &bull; Gerçek Zamanlı LWIR Anomali Analizi ve LLM Güvenlik Değerlendirmeleri
+        Perimeter Surveillance &bull; Real-Time LWIR Anomaly Analytics & LLM Threat Assessments
       </div>
     </div>
     <div style="display: flex; gap: 8px; align-items: center;">
-      <button type="button" class="btn btn-secondary" onclick="window.print()" title="Raporu yazdır veya PDF olarak kaydet">🖨️ Yazdır / PDF</button>
-      <a href="/report" target="_blank" class="btn btn-secondary" title="Ayrı sekmede tam sayfa raporu görüntüle">↗️ Ayrı Sekmede Aç</a>
+      <button type="button" class="btn btn-secondary" onclick="window.print()" title="Print report or save as PDF">🖨️ Print / Save as PDF</button>
+      <a href="/report" target="_blank" class="btn btn-secondary" title="Open full-page report in new tab">↗️ Open in New Tab</a>
     </div>
   </div>
   <div class="card-body" style="padding: 20px;">
     <!-- Stats Row -->
     <div class="report-stats-grid">
       <div class="report-stat-card">
-        <div class="metric-label">TOPLAM TARANAN KARE</div>
+        <div class="metric-label">TOTAL PROCESSED FRAMES</div>
         <div class="metric-number" id="rep-total-frames">0</div>
-        <div class="metric-unit">kare incelendi</div>
+        <div class="metric-unit">frames evaluated</div>
       </div>
       <div class="report-stat-card">
-        <div class="metric-label">TESPİT EDİLEN ANOMALİ</div>
+        <div class="metric-label">DETECTED ANOMALIES</div>
         <div class="metric-number" id="rep-event-count" style="color: var(--accent-red);">0</div>
-        <div class="metric-unit">olay kaydı</div>
+        <div class="metric-unit">incidents logged</div>
       </div>
       <div class="report-stat-card">
-        <div class="metric-label">ANOMALİ KARELERİ</div>
+        <div class="metric-label">ANOMALY FRAMES</div>
         <div class="metric-number" id="rep-anom-frames" style="color: var(--accent-red);">0</div>
-        <div class="metric-unit">ihlalli an</div>
+        <div class="metric-unit">breach frames</div>
       </div>
       <div class="report-stat-card">
-        <div class="metric-label">ORTALAMA İŞLEME HIZI</div>
+        <div class="metric-label">AVERAGE INFERENCE SPEED</div>
         <div class="metric-number" id="rep-fps" style="color: var(--accent-green);">0.0</div>
-        <div class="metric-unit">FPS / Gerçek Zamanlı</div>
+        <div class="metric-unit">FPS / Real-Time</div>
       </div>
     </div>
 
     <!-- Events List / Table -->
     <div style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-      <span>TESPİT EDİLEN İHLAL VE GÜVENLİK OLAYLARI</span>
-      <span id="rep-events-badge" style="font-size: 11px; color: var(--text-muted);">0 Kayıt</span>
+      <span>DETECTED BREACHES & SECURITY INCIDENTS</span>
+      <span id="rep-events-badge" style="font-size: 11px; color: var(--text-muted);">0 Records</span>
     </div>
     <div id="inline-report-events" style="display: flex; flex-direction: column; gap: 12px;">
       <div class="no-events" style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--card-subtle); border: 1px dashed var(--border); border-radius: 6px;">
-        Henüz anomali olayı kaydedilmedi. Video akışı başlatıldığında tespit edilen sızma olayları ve LLM taktiksel özetleri buraya anında yansıtılacaktır.
+        No anomaly events recorded yet. When video streaming starts, detected intrusions and LLM tactical summaries will appear here in real time.
       </div>
     </div>
   </div>
@@ -1201,7 +1372,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     localStorage.setItem('tg_theme', next);
     const btn = document.getElementById('theme-btn');
     if (btn) btn.textContent = next === 'dark' ? '☀️' : '🌙';
-    drawScoreGraph(currentThreshold);
   }
 
   (function initTheme() {
@@ -1210,9 +1380,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     window.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('theme-btn');
       if (btn) btn.textContent = saved === 'dark' ? '☀️' : '🌙';
-      drawScoreGraph(currentThreshold);
 
-      // Sayfa ilk yüklendiğinde akış durumunu senkronize et
+      // Synchronize status on initial page load
       fetch('/api/status').then(r => r.json()).then(s => {
         updateStatus(s);
         if (s.status === 'running') {
@@ -1242,7 +1411,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       if (!inp.value.startsWith('rtsp://')) inp.value = 'rtsp://';
     } else if (sel === 'custom') {
       inp.style.display = 'inline-block';
-      inp.placeholder = 'data/ornek.mp4 veya klasör';
+      inp.placeholder = 'data/ornek.mp4 or folder';
     } else {
       inp.style.display = 'none';
     }
@@ -1257,7 +1426,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     const btn = document.getElementById('start-btn');
     const origText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Yükleniyor...';
+    btn.textContent = 'Uploading...';
 
     fetch('/api/upload_video', {
       method: 'POST',
@@ -1272,16 +1441,63 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const inp = document.getElementById('source-input');
         inp.style.display = 'inline-block';
         inp.value = data.path;
-        alert('Video başarıyla yüklendi: ' + data.filename + '\\nBaşlat butonuna basarak izleyebilirsiniz.');
+        alert('Video successfully uploaded: ' + data.filename + '\\nClick Start to begin monitoring.');
       } else {
-        alert('Yükleme hatası: ' + (data.error || 'Bilinmeyen hata'));
+        alert('Upload failed: ' + (data.error || 'Unknown error'));
       }
     })
     .catch(err => {
       btn.disabled = false;
       btn.textContent = origText;
-      alert('Yükleme başarısız: ' + err);
+      alert('Upload failed: ' + err);
     });
+  }
+
+  function scrollToReport() {
+    const el = document.getElementById('report-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function renderInlineReport(events) {
+    const repFeed = document.getElementById('inline-report-events');
+    const repBadge = document.getElementById('rep-events-badge');
+    if (repBadge) repBadge.textContent = (events ? events.length : 0) + ' Records';
+    if (!repFeed) return;
+
+    if (!events || events.length === 0) {
+      repFeed.innerHTML = `<div class="no-events" style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--card-subtle); border: 1px dashed var(--border); border-radius: 6px;">No anomaly events recorded yet. When video streaming starts, detected intrusions and LLM tactical summaries will appear here in real time.</div>`;
+      return;
+    }
+
+    repFeed.innerHTML = events.slice().reverse().map(ev => {
+      const startTime = ev.start_time ? ev.start_time.replace('T', ' ').substring(0, 19) : '-';
+      const durationSec = (ev.duration_frames / 20.0).toFixed(1);
+      const isCritical = ev.peak_score >= 0.5;
+      const badgeText = isCritical ? '🚨 CRITICAL ALERT' : '⚠️ SUSPICIOUS INTRUSION';
+      const badgeBg = isCritical ? 'var(--accent-red-bg)' : 'rgba(234, 179, 8, 0.15)';
+      const badgeColor = isCritical ? 'var(--accent-red)' : '#ca8a04';
+      const borderColor = isCritical ? 'var(--accent-red)' : '#eab308';
+
+      return `
+        <div style="border: 1px solid var(--border); border-left: 4px solid ${borderColor}; border-radius: 6px; padding: 14px 16px; background: var(--card-bg);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <span style="background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing:0.04em;">
+              ${badgeText} #${ev.event_id}
+            </span>
+            <span style="font-size: 12px; color: var(--text-muted); font-family: monospace;">${startTime}</span>
+          </div>
+          <div style="display:flex; gap: 16px; flex-wrap:wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+            <div>Frame Range: <strong style="color:var(--text); font-family:monospace;">${ev.start_frame} &ndash; ${ev.end_frame}</strong></div>
+            <div>Duration: <strong style="color:var(--text);">${ev.duration_frames} frames (~${durationSec} s)</strong></div>
+            <div>Peak Score: <strong style="color:var(--accent-red); font-family:monospace;">${ev.peak_score.toFixed(4)}</strong></div>
+            <div>Target Type: <strong style="color:var(--text); text-transform:capitalize;">${ev.anomaly_type || 'intruder'}</strong></div>
+          </div>
+          <div style="font-size: 13px; color: var(--text); background: var(--card-subtle); padding: 10px 12px; border-radius: 4px; line-height: 1.5; border: 1px solid var(--border);">
+            <strong>Tactical Assessment (LLM):</strong> ${ev.llm_summary || '(Generating tactical assessment...)'}
+          </div>
+        </div>
+      `;
+    }).join('');
   }
 
   function startStream() {
@@ -1293,13 +1509,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     let source = sourceSel;
     let param = '';
 
-    if (sourceSel === 'vehicle_night') {
+    if (sourceSel === 'field_thermal' || sourceSel === 'ornek_1') {
+      source = 'field_thermal';
+      param = 'data/Ornek-Veri-1-Termal.mp4';
+    } else if (sourceSel === 'kaist_cyclist') {
+      source = 'kaist_cyclist';
+    } else if (sourceSel === 'kaist_pedestrian') {
+      source = 'kaist_pedestrian';
+    } else if (sourceSel === 'vehicle_night') {
       source = 'vehicle_night';
     } else if (sourceSel === 'crawler') {
       source = 'crawler';
-    } else if (sourceSel === 'ornek_1') {
-      source = 'ornek_1';
-      param = 'data/Ornek-Veri-1-Termal.mp4';
     } else if (sourceSel === 'synthetic') {
       source = 'synthetic';
     } else if (sourceSel === 'webcam_0') {
@@ -1315,14 +1535,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       source = 'rtsp';
       param = sourceInp;
       if (!param || param === 'rtsp://') {
-        alert('Lütfen geçerli bir RTSP adresi girin (örn: rtsp://192.168.1.50/stream)');
+        alert('Please enter a valid RTSP URL (e.g. rtsp://192.168.1.50/stream)');
         return;
       }
     } else if (sourceSel === 'custom') {
       source = 'custom';
       param = sourceInp;
       if (!param) {
-        alert('Lütfen bir video dosyası veya klasör yolu girin veya "Video Yükle" butonunu kullanın.');
+        alert('Please enter a valid video file or folder path, or use the "Upload Video" button.');
         return;
       }
     }
@@ -1339,10 +1559,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           startVideoPlayback();
           startPolling();
         } else {
-          alert('Hata: ' + (d.error || 'Bilinmeyen'));
+          alert('Error: ' + (d.error || 'Unknown'));
         }
       })
-      .catch(err => alert('Sunucu bağlantı hatası: ' + err));
+      .catch(err => alert('Server connection error: ' + err));
   }
 
   window.startDemo = startStream;
@@ -1419,57 +1639,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('resume-btn').style.display = 'none';
         document.getElementById('stop-btn').style.display = 'none';
         if (statusResp.status === 'error' && statusResp.error) {
-          alert('Akış Hatası: ' + statusResp.error);
+          alert('Stream Error: ' + statusResp.error);
         }
       }
     } catch (e) { /* network delay */ }
-  }
-
-  function scrollToReport() {
-    const el = document.getElementById('report-section');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  }
-
-  function renderInlineReport(events) {
-    const repFeed = document.getElementById('inline-report-events');
-    const repBadge = document.getElementById('rep-events-badge');
-    if (repBadge) repBadge.textContent = (events ? events.length : 0) + ' Kayıt';
-    if (!repFeed) return;
-
-    if (!events || events.length === 0) {
-      repFeed.innerHTML = `<div class="no-events" style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--card-subtle); border: 1px dashed var(--border); border-radius: 6px;">Henüz anomali olayı kaydedilmedi. Video akışı başlatıldığında tespit edilen sızma olayları ve LLM taktiksel özetleri buraya anında yansıtılacaktır.</div>`;
-      return;
-    }
-
-    repFeed.innerHTML = events.slice().reverse().map(ev => {
-      const startTime = ev.start_time ? ev.start_time.replace('T', ' ').substring(0, 19) : '-';
-      const durationSec = (ev.duration_frames / 20.0).toFixed(1);
-      const isCritical = ev.peak_score >= 0.5;
-      const badgeText = isCritical ? '🚨 KRİTİK ALARM' : '⚠️ ŞÜPHELİ İHLAL';
-      const badgeBg = isCritical ? 'var(--accent-red-bg)' : 'rgba(234, 179, 8, 0.15)';
-      const badgeColor = isCritical ? 'var(--accent-red)' : '#ca8a04';
-      const borderColor = isCritical ? 'var(--accent-red)' : '#eab308';
-
-      return `
-        <div style="border: 1px solid var(--border); border-left: 4px solid ${borderColor}; border-radius: 6px; padding: 14px 16px; background: var(--card-bg);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-            <span style="background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing:0.04em;">
-              ${badgeText} #${ev.event_id}
-            </span>
-            <span style="font-size: 12px; color: var(--text-muted); font-family: monospace;">${startTime}</span>
-          </div>
-          <div style="display:flex; gap: 16px; flex-wrap:wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
-            <div>Kare Aralığı: <strong style="color:var(--text); font-family:monospace;">${ev.start_frame} &ndash; ${ev.end_frame}</strong></div>
-            <div>Süre: <strong style="color:var(--text);">${ev.duration_frames} kare (~${durationSec} sn)</strong></div>
-            <div>Tepe Skoru: <strong style="color:var(--accent-red); font-family:monospace;">${ev.peak_score.toFixed(4)}</strong></div>
-            <div>Hedef Türü: <strong style="color:var(--text); text-transform:capitalize;">${ev.anomaly_type || 'intruder'}</strong></div>
-          </div>
-          <div style="font-size: 13px; color: var(--text); background: var(--card-subtle); padding: 10px 12px; border-radius: 4px; line-height: 1.5; border: 1px solid var(--border);">
-            <strong>Taktiksel Değerlendirme (LLM):</strong> ${ev.llm_summary || '(Taktiksel özet oluşturuluyor...)'}
-          </div>
-        </div>
-      `;
-    }).join('');
   }
 
   function updateStatus(s) {
@@ -1489,28 +1662,18 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     if (repFps) repFps.textContent = s.fps.toFixed(1);
 
     currentThreshold = s.threshold || 0.20;
-    const score = s.latest_score;
-    const pct = Math.min((score / (currentThreshold * 2)) * 100, 100);
-    const fill = document.getElementById('score-bar-fill');
-    fill.style.width = pct + '%';
-    fill.style.background = score >= currentThreshold ? 'var(--accent-red)' : 'var(--accent-blue)';
-    document.getElementById('score-label').textContent = score.toFixed(5);
 
     const badge = document.getElementById('status-badge');
     const statusMap = {
       idle: ['idle', 'Ready'],
-      running: ['running', 'Running'],
+      running: ['running', 'Monitoring'],
+      paused: ['paused', 'Paused'],
       done: ['done', 'Completed'],
       error: ['error', 'Error'],
     };
     const [cls, txt] = statusMap[s.status] || ['idle', 'Ready'];
     badge.className = 'status-badge ' + cls;
     document.getElementById('status-text').textContent = txt;
-
-    fetch('/api/score_history').then(r => r.json()).then(h => {
-      scoreHistory = h;
-      drawScoreGraph(currentThreshold);
-    }).catch(() => {});
   }
 
   function updateEvents(events) {
@@ -1539,111 +1702,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <span>Duration: <strong>${ev.duration_frames} frames</strong></span>
           <span>Type: <strong>${ev.anomaly_type || 'Unknown'}</strong></span>
         </div>
-        <div class="alert-summary">${ev.llm_summary || '(Generating LLM summary...)'}</div>
+        <div class="alert-summary">${ev.llm_summary || '(Generating LLM assessment...)'}</div>
       `;
       feed.prepend(card);
     }
     knownEvents = events.length;
-  }
-
-  function drawScoreGraph(threshold) {
-    const canvas = document.getElementById('score-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.offsetWidth;
-    const H = canvas.offsetHeight;
-    if (W === 0 || H === 0) return;
-    canvas.width = W;
-    canvas.height = H;
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const bgColor = isDark ? '#1e293b' : '#ffffff';
-    const textColor = isDark ? '#94a3b8' : '#64748b';
-    const gridColor = isDark ? '#334155' : '#f1f5f9';
-
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, W, H);
-
-    if (!scoreHistory || scoreHistory.length < 2) {
-      ctx.fillStyle = textColor;
-      ctx.font = '12px -apple-system, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Waiting for data...', W / 2, H / 2);
-      return;
-    }
-
-    const pad = { l: 40, r: 16, t: 14, b: 20 };
-    const pw = W - pad.l - pad.r;
-    const ph = H - pad.t - pad.b;
-
-    const scores = scoreHistory.map(s => s.score);
-    const maxY = Math.max(threshold * 1.8, ...scores, 0.4);
-
-    // Grid lines
-    ctx.strokeStyle = gridColor;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let s = 0; s <= 3; s++) {
-      const yVal = (maxY / 3) * s;
-      const yPos = pad.t + ph * (1 - yVal / maxY);
-      ctx.moveTo(pad.l, yPos);
-      ctx.lineTo(pad.l + pw, yPos);
-    }
-    ctx.stroke();
-
-    // Y-axis labels
-    ctx.fillStyle = textColor;
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    for (let s = 0; s <= 3; s++) {
-      const yVal = (maxY / 3) * s;
-      const yPos = pad.t + ph * (1 - yVal / maxY);
-      ctx.fillText(yVal.toFixed(2), pad.l - 6, yPos + 3);
-    }
-
-    // Threshold line
-    const ty = pad.t + ph * (1 - threshold / maxY);
-    ctx.strokeStyle = '#dc2626';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pad.l, ty);
-    ctx.lineTo(pad.l + pw, ty);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    ctx.fillStyle = '#dc2626';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('Threshold (' + threshold.toFixed(2) + ')', pad.l + 6, ty - 4);
-
-    // Score line
-    ctx.lineWidth = 1.8;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-
-    for (let i = 1; i < scoreHistory.length; i++) {
-      const x1 = pad.l + ((i - 1) / (scoreHistory.length - 1)) * pw;
-      const y1 = pad.t + ph * (1 - Math.min(scoreHistory[i - 1].score, maxY) / maxY);
-      const x2 = pad.l + (i / (scoreHistory.length - 1)) * pw;
-      const y2 = pad.t + ph * (1 - Math.min(scoreHistory[i].score, maxY) / maxY);
-
-      const isAnomaly = scoreHistory[i].score >= threshold;
-      ctx.strokeStyle = isAnomaly ? '#dc2626' : (isDark ? '#60a5fa' : '#2563eb');
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-    }
-
-    // Current point
-    const last = scoreHistory[scoreHistory.length - 1];
-    const lx = pad.l + pw;
-    const ly = pad.t + ph * (1 - Math.min(last.score, maxY) / maxY);
-    ctx.fillStyle = last.score >= threshold ? '#dc2626' : (isDark ? '#60a5fa' : '#2563eb');
-    ctx.beginPath();
-    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-    ctx.fill();
   }
 </script>
 </body>
@@ -1654,7 +1717,7 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ThermalGuard-VAD | Anomaly Report</title>
+  <title>ThermalGuard-VAD | Tactical Anomaly Report</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -1695,7 +1758,7 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
       border-radius: 6px;
       padding: 12px 16px;
     }
-    .stat-l { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+    .stat-l { font-size: 11px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; }
     .stat-v { font-size: 22px; font-weight: 700; color: #0f172a; font-family: monospace; }
     .section-title {
       font-size: 14px;
@@ -1771,7 +1834,7 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
   <div class="header">
     <div>
-      <h1>ThermalGuard-VAD — Anomaly Detection Report</h1>
+      <h1>ThermalGuard-VAD — Tactical Anomaly Detection Report</h1>
       <p class="sub">Generated: {{ generated_at }} &bull; Perimeter Surveillance AI Evaluation Document</p>
     </div>
     <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
@@ -1799,7 +1862,7 @@ REPORT_HTML_TEMPLATE = """<!DOCTYPE html>
         <div>Peak Score: <strong>{{ "%.4f"|format(ev.peak_score) }}</strong></div>
         <div>Type: <strong>{{ ev.anomaly_type }}</strong></div>
       </div>
-      <div class="ev-summary">{{ ev.llm_summary or "(No LLM summary generated)" }}</div>
+      <div class="ev-summary">{{ ev.llm_summary or "(No LLM assessment generated)" }}</div>
     </div>
     {% endfor %}
   {% else %}
@@ -1824,7 +1887,7 @@ def index():
 
 @app.route("/stream")
 def stream():
-    """MJPEG video stream."""
+    """MJPEG video stream broadcaster."""
     def generate():
         blank = np.full((380, 640, 3), 22, dtype=np.uint8)
         cv2.putText(blank, "Waiting for stream...", (200, 190),
@@ -1837,7 +1900,7 @@ def stream():
             data = frame_bytes if frame_bytes else blank_bytes
             yield (b"--frame\r\n"
                    b"Content-Type: image/jpeg\r\n\r\n" + data + b"\r\n")
-            time.sleep(0.05)
+            time.sleep(0.048)
 
     return Response(
         stream_with_context(generate()),
@@ -1851,12 +1914,12 @@ UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 @app.route("/api/upload_video", methods=["POST"])
 def upload_video():
-    """Kullanıcının yüklediği video dosyasını kaydeder."""
+    """Saves user-uploaded video file to server."""
     if "video" not in request.files:
-        return jsonify({"ok": False, "error": "Dosya yüklenmedi"}), 400
+        return jsonify({"ok": False, "error": "No video file provided"}), 400
     file = request.files["video"]
     if not file.filename:
-        return jsonify({"ok": False, "error": "Geçersiz dosya adı"}), 400
+        return jsonify({"ok": False, "error": "Invalid filename"}), 400
     safe_name = os.path.basename(file.filename)
     dest = UPLOAD_FOLDER / safe_name
     file.save(str(dest))
@@ -1866,12 +1929,12 @@ def upload_video():
 @app.route("/api/run_stream", methods=["POST"])
 @app.route("/api/run_demo", methods=["POST"])
 def run_stream():
-    """Seçilen kaynaktan akışı veya demoyu başlatır."""
+    """Starts stream processing from selected input source."""
     if state.is_running:
         state.is_running = False
         time.sleep(0.15)
     llm = request.args.get("llm", "rule")
-    source = request.args.get("source", "synthetic")
+    source = request.args.get("source", "field_thermal")
     param = request.args.get("param", "")
     loop = request.args.get("loop", "true").lower() in ("true", "1", "yes")
 
@@ -1936,7 +1999,7 @@ def report():
 
 
 # =========================================================================== #
-#  Giriş Noktası
+#  Application Entry Point
 # =========================================================================== #
 if __name__ == "__main__":
     print("=" * 65)

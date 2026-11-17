@@ -1,19 +1,19 @@
 """
-KAIST Multispectral Pedestrian Benchmark — yalnızca LWIR kanalı.
+KAIST Multispectral Pedestrian Benchmark — LWIR thermal channel only.
 
-Anomali protokolü ("Yaya-sız normallik / Perimeter Intrusion"):
-  * **Normal (0)**  : karede hiçbir anotasyonlu nesne yok.
-  * **Anomali (1)** : en az bir ``person / people / cyclist`` kutusu, yüksekliği
-    ``min_height`` pikselden büyük (sahada görünür bir izinsiz giriş).
-  * **Belirsiz (-1)**: yalnızca çok küçük / ``person?`` kutuları — eğitimde de
-    değerlendirmede de kullanılmaz (etiket gürültüsünü önler).
+Anomaly protocol ("Pedestrian-free normality / Perimeter Intrusion"):
+  * **Normal (0)**  : Frame contains no annotated objects.
+  * **Anomaly (1)** : At least one ``person / people / cyclist`` box with height
+    greater than ``min_height`` pixels (visible real-world intruder).
+  * **Ambiguous (-1)**: Only distant/tiny or ``person?`` boxes — excluded from both
+    training and evaluation (eliminates label ambiguity).
 
-Eğitim yalnızca tamamı normal (0) olan kliplerle yapılır → denetimsiz.
-Etiketler sadece değerlendirme (AUROC) için kullanılır.
+Training is strictly conducted on purely normal (0) clips -> unsupervised.
+Annotations are exclusively utilized for downstream validation (AUROC metrics).
 
-Desteklenen klasör düzenleri:
-  * HF aynası  : images/setXX/VYYY/lwir/I*.jpg  + annotations/setXX/VYYY/I*.xml
-  * Orijinal   : images/setXX/VYYY/lwir/I*.jpg  + annotations/setXX/VYYY/I*.txt (bbGt v3)
+Supported directory structures:
+  * HF mirror  : images/setXX/VYYY/lwir/I*.jpg  + annotations/setXX/VYYY/I*.xml
+  * Original   : images/setXX/VYYY/lwir/I*.jpg  + annotations/setXX/VYYY/I*.txt (bbGt v3)
 """
 from __future__ import annotations
 
@@ -77,9 +77,9 @@ def frame_label(boxes: list[Box], min_height: float) -> int:
 class KaistSequence:
     name: str               # 'set00/V000'
     files: list[str]
-    frame_idx: np.ndarray   # orijinal kare numaraları (I01234 → 1234)
+    frame_idx: np.ndarray   # original frame index (I01234 -> 1234)
     labels: np.ndarray      # int8, {-1, 0, 1}
-    boxes: list[list[Box]]  # orijinal (640x512) koordinatlarda
+    boxes: list[list[Box]]  # in original (640x512) coordinates
     src_size: tuple[int, int] = (640, 512)
 
     @property
@@ -90,12 +90,12 @@ class KaistSequence:
 
     def summary(self) -> str:
         l = self.labels
-        return (f"{self.name}: {len(l)} kare | normal={int((l == 0).sum())} "
-                f"anomali={int((l == 1).sum())} belirsiz={int((l == -1).sum())} | stride={self.stride}")
+        return (f"{self.name}: {len(l)} frames | normal={int((l == 0).sum())} "
+                f"anomaly={int((l == 1).sum())} ambiguous={int((l == -1).sum())} | stride={self.stride}")
 
 
 def find_sequences(root: str) -> list[str]:
-    """root/images altındaki tüm 'setXX/VYYY' sekanslarını listeler."""
+    """List all 'setXX/VYYY' sequences under root/images."""
     seqs = []
     for d in sorted(glob.glob(os.path.join(root, "images", "set*", "*", "lwir"))):
         seqs.append(Path(os.path.relpath(Path(d).parent, os.path.join(root, "images"))).as_posix())
@@ -121,7 +121,7 @@ def load_sequence(root: str, name: str, min_height: float = 30.0) -> KaistSequen
 
 def boxes_to_mask(boxes: list[Box], src_size: tuple[int, int], out_size: tuple[int, int],
                   min_height: float = 0.0) -> np.ndarray:
-    """Anomali kutularını çıkış çözünürlüğünde ikili maskeye çevirir (piksel-AUROC için)."""
+    """Converts bounding boxes to a binary ground truth mask (for pixel-level AUROC)."""
     W, H = out_size
     sx, sy = W / src_size[0], H / src_size[1]
     m = np.zeros((H, W), np.uint8)

@@ -1,5 +1,5 @@
 """
-ThermalGuard Raporlama ve Bildirim Modülü.
+ThermalGuard Incident Reporting and Notification Module.
 """
 from .logger import EventLogger, AnomalyEvent
 from .llm_summary import LLMSummarizer

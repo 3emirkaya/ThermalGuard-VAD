@@ -1,4 +1,4 @@
-"""Convolutional LSTM (Shi et al., NeurIPS 2015) — ONNX dışa aktarımına uygun, saf PyTorch."""
+"""Convolutional LSTM (Shi et al., NeurIPS 2015) — ONNX export friendly, pure PyTorch implementation."""
 from __future__ import annotations
 
 from typing import Optional
@@ -11,12 +11,12 @@ class ConvLSTMCell(nn.Module):
     def __init__(self, in_ch: int, hid_ch: int, kernel_size: int = 3):
         super().__init__()
         self.hid_ch = hid_ch
-        # Tek konvolüsyonla 4 kapı (i, f, o, g) — çekirdek füzyonu → daha hızlı çıkarım.
+        # 4 gates (i, f, o, g) computed via single fused convolution -> faster inference.
         self.gates = nn.Conv2d(in_ch + hid_ch, 4 * hid_ch, kernel_size, padding=kernel_size // 2)
-        # GroupNorm: küçük batch'lerde (kenar cihaz, B=1) BatchNorm'dan daha kararlı.
+        # GroupNorm: more stable than BatchNorm for small batches (edge devices, B=1).
         self.norm = nn.GroupNorm(4, 4 * hid_ch)
         nn.init.zeros_(self.gates.bias)
-        with torch.no_grad():  # unutma kapısı ön yargısı = 1 → erken eğitimde gradyan akışı
+        with torch.no_grad():  # forget gate bias = 1.0 -> stable gradient flow in early training
             self.gates.bias[hid_ch:2 * hid_ch].fill_(1.0)
 
     def forward(self, x: torch.Tensor, state: tuple[torch.Tensor, torch.Tensor]):
@@ -34,7 +34,7 @@ class ConvLSTMCell(nn.Module):
 
 
 class ConvLSTM(nn.Module):
-    """Yığılmış ConvLSTM. Giriş (B, T, C, H, W) → çıkış dizisi (B, T, C_h, H, W) ve son durumlar."""
+    """Stacked ConvLSTM. Input (B, T, C, H, W) -> output sequence (B, T, C_h, H, W) and final states."""
 
     def __init__(self, in_ch: int, hidden: list[int], kernel_size: int = 3):
         super().__init__()

@@ -1,14 +1,14 @@
 """
-PyTorch Veri Seti — Termal Video Klipleri (Spatio-Temporal Sliding Window).
+PyTorch Dataset — Thermal Video Clips (Spatio-Temporal Sliding Window).
 
-Özellikler:
-  * Tamamen denetimsiz (unsupervised): Eğitimde yalnızca etiketli yaya / anomali
-    bulunmayan (label == 0) normal karelerden oluşan pencereler seçilir.
-  * Klip formatı: (T, 1, H, W) float32 ∈ [0, 1].
-  * Bellek optimizasyonu: Tüm kareler ön işlenmiş olarak uint8 (0..255) formatında
-    RAM'de saklanır; float32 tensöre dönüştürme ve normalizasyon __getitem__'da
-    GPU aktarımı öncesinde yapılır.
-  * Sahadaki zorlukları taklit eden çevrimiçi veri artırımı (ThermalDegrader).
+Key features:
+  * Completely unsupervised: Training selects only normal clips devoid of
+    annotated pedestrians or anomalies (label == 0).
+  * Clip format: (T, 1, H, W) float32 in [0, 1].
+  * Memory optimization: All frames are stored preprocessed as uint8 (0..255)
+    in RAM; conversion to float32 tensors and normalization occurs in __getitem__
+    right before GPU transfer.
+  * Online thermal data augmentations simulating harsh field conditions (ThermalDegrader).
 """
 from __future__ import annotations
 
@@ -26,22 +26,22 @@ from .sources import read_thermal
 
 class ThermalClipDataset(Dataset):
     """
-    Termal sekanslardan kayan pencere (sliding window) ile (T, C, H, W) klipler çıkarır.
+    Extracts (T, C, H, W) clips from thermal sequences using a sliding window.
     """
 
     def __init__(
         self,
-        frames: np.ndarray,                     # (N, H, W) uint8 ön işlenmiş kareler
+        frames: np.ndarray,                     # (N, H, W) uint8 preprocessed frames
         clip_len: int = 8,
         stride: int = 1,
         labels: Optional[np.ndarray] = None,    # (N,) int8, {-1, 0, 1}
-        masks: Optional[np.ndarray] = None,     # (N, H, W) uint8 piksel yer doğruluğu
+        masks: Optional[np.ndarray] = None,     # (N, H, W) uint8 pixel ground truth
         only_normal: bool = True,
         augment: bool = False,
         degradation_cfg: Optional[DegradationConfig] = None,
     ):
         super().__init__()
-        assert frames.ndim == 3, f"Beklenen şekil: (N, H, W), gelen: {frames.shape}"
+        assert frames.ndim == 3, f"Expected shape: (N, H, W), got: {frames.shape}"
         self.frames = frames
         self.clip_len = clip_len
         self.stride = stride
@@ -49,14 +49,14 @@ class ThermalClipDataset(Dataset):
         self.degrader = ThermalDegrader(degradation_cfg or DegradationConfig()) if augment else None
         self.masks = masks
 
-        # Geçerli klip başlangıç indekslerini filtrele
+        # Filter valid clip start indices
         valid_indices = []
         n_total = len(frames) - clip_len + 1
 
         for i in range(0, max(0, n_total), stride):
             if only_normal and labels is not None:
                 clip_lbls = labels[i : i + clip_len]
-                # Klip içinde herhangi bir anomali (1) veya belirsiz (-1) kare varsa eğitimden çıkar
+                # If clip contains any anomaly (1) or ambiguous (-1) frame, exclude from training
                 if np.any(clip_lbls != 0):
                     continue
             valid_indices.append(i)
@@ -72,11 +72,11 @@ class ThermalClipDataset(Dataset):
         clip_u8 = self.frames[start : start + self.clip_len].copy()  # (T, H, W)
 
         if self.augment and self.degrader is not None:
-            # Klip bazında tutarlı gürültü/bozulma
+            # Consistent degradation across the clip
             for t in range(len(clip_u8)):
                 clip_u8[t] = self.degrader(clip_u8[t])
 
-        # float32 [0, 1] tensöre çevir: (T, 1, H, W)
+        # Convert to float32 [0, 1] tensor: (T, 1, H, W)
         clip_t = torch.from_numpy(clip_u8).unsqueeze(1).float() / 255.0
 
         item = {
@@ -88,7 +88,7 @@ class ThermalClipDataset(Dataset):
         if self.labels is not None:
             clip_labels = self.labels[start : start + self.clip_len]
             item["labels"] = torch.from_numpy(clip_labels).long()
-            # Son karenin anomali durumu (VAD çıkarımında ana hedef)
+            # Anomaly state of the target (last) frame (primary VAD target)
             item["target_label"] = int(clip_labels[-1])
 
         if self.masks is not None:
@@ -107,7 +107,7 @@ def build_dataset_from_sequences(
     degradation_cfg: Optional[DegradationConfig] = None,
 ) -> ThermalClipDataset:
     """
-    Birden fazla sekansı ön işleyip birleşik ThermalClipDataset oluşturur.
+    Preprocesses multiple sequences and constructs a unified ThermalClipDataset.
     """
     all_frames = []
     all_labels = []
@@ -116,13 +116,13 @@ def build_dataset_from_sequences(
 
     for seq in sequences:
         preprocessor.reset()
-        print(f"[+] Ön işleniyor: {seq.name} ({len(seq.files)} kare)...")
+        print(f"[+] Preprocessing: {seq.name} ({len(seq.files)} frames)...")
         raw_frames = [read_thermal(f) for f in seq.files]
         u8_frames = preprocessor.process_sequence(raw_frames)
         all_frames.append(u8_frames)
         all_labels.append(seq.labels)
 
-        # Maskeleri hesapla
+        # Compute ground truth masks
         seq_masks = np.zeros((len(seq.files), out_size[1], out_size[0]), dtype=np.uint8)
         for i, boxes in enumerate(seq.boxes):
             if boxes:

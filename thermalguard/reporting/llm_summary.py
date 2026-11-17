@@ -1,27 +1,15 @@
 """
-ThermalGuard LLM Uyarı Özeti Üretici.
+ThermalGuard LLM Security Alert Summarizer.
 
-Başvuru kapsamı:
-  "Uyarı metinlerinin bir dil modeliyle okunabilir özetlere dönüştürülmesi"
+Transforms raw numerical anomaly telemetry (frame indices, peak score, duration,
+detected threat category) into actionable natural language operational security summaries.
 
-Bu modül, tespit edilen anomali olaylarının ham verilerini (kare numarası,
-skor, süre, tür) alarak doğal dil açıklamalarına dönüştürür.
-
-Desteklenen Arka Uçlar (API):
--------------------------------
-1. ``ollama``  : Lokal Ollama sunucusu (Llama-3, Mistral, Gemma, vb.)
-               → İnternet gerekmez, gizlilik güçlü, ücretsiz
-2. ``openai``  : OpenAI API (GPT-4o, GPT-4o-mini)
-               → OPENAI_API_KEY çevre değişkeni gerekir
-3. ``google``  : Google Gemini API (gemini-1.5-flash)
-               → GOOGLE_API_KEY çevre değişkeni gerekir
-4. ``rule``    : Kural tabanlı şablon (hiçbir API gerekmez, her zaman çalışır)
-               → Offline / fallback modu
-
-Kural tabanlı mod:
-------------------
-``backend="rule"`` seçildiğinde API çağrısı yapılmaz; anomali türü, skoru
-ve süresi üzerinden önceden tanımlı Türkçe şablonlar kullanılır.
+Supported LLM Backends:
+-----------------------
+1. ``rule``    : Offline rule-based deterministic template (default, zero network or API key required).
+2. ``ollama``  : Local Ollama daemon (Llama-3, Mistral, Gemma, etc.) — local & private.
+3. ``openai``  : OpenAI API (GPT-4o, GPT-4o-mini) via OPENAI_API_KEY.
+4. ``google``  : Google Gemini API (gemini-1.5-flash) via GOOGLE_API_KEY.
 """
 from __future__ import annotations
 
@@ -77,7 +65,7 @@ def _build_user_prompt(event: AnomalyEvent, fps: float = 20.0) -> str:
 #  Rule-Based Summary Generator (Offline / Fallback)
 # --------------------------------------------------------------------------- #
 def _rule_based_summary(event: AnomalyEvent, fps: float = 20.0) -> str:
-    """Template-based English summary generator requiring no external API."""
+    """Template-based operational English summary generator requiring no external API."""
     duration_s = event.duration_frames / max(fps, 1.0)
 
     type_desc = {
@@ -107,13 +95,13 @@ def _rule_based_summary(event: AnomalyEvent, fps: float = 20.0) -> str:
 
 
 # --------------------------------------------------------------------------- #
-#  Ana Sınıf
+#  Main Summarizer Class
 # --------------------------------------------------------------------------- #
 class LLMSummarizer:
     """
-    AnomalyEvent nesneleri için Türkçe doğal dil uyarı özeti üretir.
+    Generates natural language security summaries for AnomalyEvent incidents.
 
-    Örnek::
+    Example::
 
         summarizer = LLMSummarizer(backend="ollama", model="llama3")
         summary = summarizer.summarize(event)
@@ -133,18 +121,17 @@ class LLMSummarizer:
         Parameters
         ----------
         backend     : 'rule' | 'ollama' | 'openai' | 'google'
-        model       : LLM model adı (backend'e göre varsayılan seçilir)
-        api_key     : OpenAI / Google API anahtarı (None → çevre değişkeninden okunur)
-        ollama_url  : Ollama API URL
-        fps         : Video FPS (süre hesabı için)
-        timeout     : API isteği zaman aşımı (saniye)
+        model       : LLM model identifier (defaults chosen per backend)
+        api_key     : OpenAI or Google API key (falls back to environment variable)
+        ollama_url  : Local Ollama daemon URL
+        fps         : Video frame rate for time calculations
+        timeout     : HTTP request timeout in seconds
         """
         self.backend = backend.lower()
         self.fps = fps
         self.timeout = timeout
         self.ollama_url = ollama_url.rstrip("/")
 
-        # Model varsayılanları
         _defaults = {
             "ollama": "llama3",
             "openai": "gpt-4o-mini",
@@ -156,8 +143,8 @@ class LLMSummarizer:
     # ------------------------------------------------------------------ #
     def summarize(self, event: AnomalyEvent) -> str:
         """
-        Anomali olayı için Türkçe özet üretir.
-        Hata durumunda kural tabanlı özete fallback yapılır.
+        Generates operational security summary for incident.
+        Falls back gracefully to deterministic rule-based template on error.
         """
         try:
             if self.backend == "rule":
@@ -169,15 +156,14 @@ class LLMSummarizer:
             elif self.backend == "google":
                 return self._google(event)
             else:
-                raise ValueError(f"Bilinmeyen backend: {self.backend}")
+                raise ValueError(f"Unknown LLM backend: {self.backend}")
         except Exception as exc:
-            # Herhangi bir hata durumunda kural tabanlı özete dön
             fallback = _rule_based_summary(event, self.fps)
-            return f"[LLM hatası: {exc}] {fallback}"
+            return f"[LLM notice: {exc}] {fallback}"
 
     # ------------------------------------------------------------------ #
     def _ollama(self, event: AnomalyEvent) -> str:
-        """Lokal Ollama sunucusuna istek atar."""
+        """Queries local Ollama service."""
         import urllib.request
 
         payload = json.dumps({
@@ -198,7 +184,7 @@ class LLMSummarizer:
 
     # ------------------------------------------------------------------ #
     def _openai(self, event: AnomalyEvent) -> str:
-        """OpenAI API summary."""
+        """Queries OpenAI API."""
         try:
             import openai
         except ImportError:
@@ -219,7 +205,7 @@ class LLMSummarizer:
 
     # ------------------------------------------------------------------ #
     def _google(self, event: AnomalyEvent) -> str:
-        """Google Gemini API summary."""
+        """Queries Google Gemini API."""
         import urllib.request
 
         key = self.api_key or os.environ.get("GOOGLE_API_KEY")
@@ -247,7 +233,7 @@ class LLMSummarizer:
     # ------------------------------------------------------------------ #
     def summarize_and_attach(self, event: AnomalyEvent, logger=None) -> str:
         """
-        Özet üretir, event'e ve (varsa) logger'a geri yazar.
+        Generates summary, attaches to the event, and updates event logger if provided.
         """
         summary = self.summarize(event)
         event.llm_summary = summary

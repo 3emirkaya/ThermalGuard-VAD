@@ -1,17 +1,16 @@
 """
-ThermalGuard Olay Kaydı (Event Logger) — Zaman Damgalı Anomali Kayıt Sistemi.
+ThermalGuard Event Logger — Timestamped Anomaly Event Logging & Persistence System.
 
-Başvuru kapsamı gereksinimleri:
-  ✅ Anomali olaylarının zaman damgasıyla kayıt altına alınması
-  ✅ Yanlış alarm önleme (debounce / persistence filtresi)
-  ✅ JSON ve CSV çıktı formatları
-  ✅ Kullanıcıya anlık bildirim için callback desteği
+Key Capabilities:
+  - Timestamped persistence of all detected thermal anomaly incidents
+  - False-alarm suppression via temporal persistence filtering (debouncing)
+  - Dual output formats: structured JSON audit logs and tabular CSV reports
+  - Thread-safe background callback dispatch for real-time notifications
 
-Kayıt Mantığı (Debounce):
---------------------------
-Tek başına yüksek gelen kare kayıt edilmez; anomali ``persist_frames``
-ardışık kare boyunca devam ederse gerçek "olay" olarak kabul edilir.
-Bu, tek karelik sensör gürültüsü / yanlış alarmları bastırır.
+Debouncing Architecture:
+  Isolated single-frame spikes are not recorded immediately. An incident is only promoted
+  to an active AnomalyEvent if anomaly conditions persist across ``persist_frames`` consecutive frames.
+  This filters out sensor noise, dead pixels, and transient NETD fluctuations.
 """
 from __future__ import annotations
 
@@ -25,46 +24,46 @@ from typing import Callable, Dict, List, Optional
 
 
 # --------------------------------------------------------------------------- #
-#  Veri Yapıları
+#  Data Structures
 # --------------------------------------------------------------------------- #
 @dataclass
 class AnomalyEvent:
-    """Tek bir anomali olayının tüm meta verisi."""
+    """Metadata container for a single detected anomaly incident."""
 
     event_id: int
     start_frame: int
     end_frame: int
-    start_time: str            # ISO 8601 zaman damgası
+    start_time: str            # ISO 8601 UTC timestamp
     end_time: Optional[str]
     duration_frames: int
-    anomaly_type: str          # 'unknown' | simülatör tipi
+    anomaly_type: str          # 'intruder' | 'vehicle' | 'crawler' | 'unknown'
     peak_score: float
     mean_score: float
-    scores: List[float]        # Olay boyunca kare bazlı skor listesi
-    llm_summary: Optional[str] = None   # LLM tarafından üretilen metin özeti
+    scores: List[float]        # Per-frame anomaly score trajectory
+    llm_summary: Optional[str] = None   # Operational natural language assessment
 
     def to_dict(self) -> Dict:
         return asdict(self)
 
     def to_brief_dict(self) -> Dict:
-        """Web arayüzü / API için hafif sözlük (scores listesi hariç)."""
+        """Lightweight dictionary for REST APIs excluding raw scores array."""
         d = self.to_dict()
         d.pop("scores", None)
         return d
 
 
 # --------------------------------------------------------------------------- #
-#  Olay Kaydı
+#  Event Logger
 # --------------------------------------------------------------------------- #
 class EventLogger:
     """
-    Kare bazlı anomali sinyallerini debounce ederek anlamlı olaylar üretir,
-    bunları JSON ve CSV dosyalarına yazar, callback'lerle dış sistemlere bildirir.
+    Debounces frame-level anomaly signals into actionable security events,
+    persisting them to JSON and CSV files, and dispatching callbacks.
 
-    Örnek kullanım::
+    Example::
 
         logger = EventLogger(log_dir="logs/", persist_frames=3)
-        logger.on_event(lambda ev: print(f"ALARM: {ev.llm_summary}"))
+        logger.on_event(lambda ev: print(f"ALERT: {ev.llm_summary}"))
 
         for res in engine:
             logger.update(res.frame_idx, res.is_anomaly, res.anomaly_score)
@@ -82,11 +81,11 @@ class EventLogger:
         """
         Parameters
         ----------
-        log_dir         : Kayıt klasörü (otomatik oluşturulur).
-        session_name    : JSON/CSV dosya adı öneki. None → timestamp.
-        persist_frames  : Olay başlatmak için gereken ardışık anomali kare sayısı.
-        max_gap_frames  : Normal kare aralığı bu değeri geçerse olay kapanır.
-        on_event_callback : Olay kapandığında çağrılan fonksiyon (AnomalyEvent alır).
+        log_dir           : Directory for audit logs (created automatically).
+        session_name      : Prefix for log filenames (default: current UTC timestamp).
+        persist_frames    : Consecutive anomaly frames required to trigger an event.
+        max_gap_frames    : Maximum normal frames allowed before closing the event.
+        on_event_callback : Optional callback invoked when an incident closes.
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -99,21 +98,20 @@ class EventLogger:
         self._csv_path = self.log_dir / f"{ts}_events.csv"
         self._all_path = self.log_dir / f"{ts}_all_frames.csv"
 
-        # Durum değişkenleri
+        # Internal state tracking
         self._event_id = 0
         self._events: List[AnomalyEvent] = []
         self._lock = threading.Lock()
 
-        # Devam eden olay takibi
+        # Active event tracking
         self._in_event: bool = False
-        self._pending_count: int = 0      # Olay başlatma için sayaç
-        self._gap_count: int = 0          # Kapanma için normal kare sayacı
+        self._pending_count: int = 0
+        self._gap_count: int = 0
         self._current_event: Optional[Dict] = None
 
-        # Tüm kare logu (frame_idx, score, is_anomaly)
+        # Full frame log (frame_idx, score, is_anomaly)
         self._all_frames: List[tuple] = []
 
-        # CSV başlıklarını oluştur
         self._init_csv()
 
     # ------------------------------------------------------------------ #
@@ -138,10 +136,9 @@ class EventLogger:
         anomaly_type: str = "unknown",
     ) -> Optional[AnomalyEvent]:
         """
-        Her kare için çağrılır. Olay kapandığında ``AnomalyEvent`` döner, aksi halde None.
+        Called on every frame. Returns ``AnomalyEvent`` when an event closes, otherwise None.
         """
         with self._lock:
-            # Tüm kare logu
             self._all_frames.append((frame_idx, anomaly_score, int(is_anomaly)))
             with open(self._all_path, "a", newline="", encoding="utf-8") as f:
                 csv.writer(f).writerow([frame_idx, f"{anomaly_score:.6f}", int(is_anomaly)])
@@ -153,7 +150,7 @@ class EventLogger:
                 if not self._in_event:
                     self._pending_count += 1
                     if self._pending_count >= self.persist_frames:
-                        # Olay başlat
+                        # Initiate new incident
                         self._in_event = True
                         start_f = frame_idx - self._pending_count + 1
                         self._current_event = {
@@ -163,7 +160,7 @@ class EventLogger:
                             "scores": [],
                         }
                 else:
-                    # Devam eden olay
+                    # Ongoing incident
                     pass
 
                 if self._in_event and self._current_event:
@@ -183,7 +180,7 @@ class EventLogger:
 
     # ------------------------------------------------------------------ #
     def _close_event(self, frame_idx: int, anomaly_type: str) -> AnomalyEvent:
-        """Mevcut olayı kapat ve kaydet."""
+        """Closes current incident and persists to disk."""
         ce = self._current_event
         scores = ce.get("scores", [])
         end_time = datetime.now(timezone.utc).isoformat()
@@ -211,10 +208,10 @@ class EventLogger:
         self._current_event = None
         self._events.append(event)
 
-        # Dosyalara yaz
+        # Write to JSON and CSV logs
         self._append_event_to_files(event)
 
-        # Callback
+        # Dispatch async callback
         if self._callback:
             threading.Thread(target=self._callback, args=(event,), daemon=True).start()
 
@@ -222,11 +219,11 @@ class EventLogger:
 
     # ------------------------------------------------------------------ #
     def _append_event_to_files(self, event: AnomalyEvent) -> None:
-        # JSON: tüm olay listesini yeniden yaz (küçük dosya → no-problem)
+        # JSON audit log
         with open(self._json_path, "w", encoding="utf-8") as f:
             json.dump([e.to_dict() for e in self._events], f, ensure_ascii=False, indent=2)
 
-        # CSV: sadece satır ekle
+        # Append to CSV table
         brief = event.to_brief_dict()
         with open(self._csv_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=[
@@ -239,8 +236,8 @@ class EventLogger:
     # ------------------------------------------------------------------ #
     def finalize(self) -> List[AnomalyEvent]:
         """
-        Video bitiminde açık kalan olayı kapat ve son JSON/CSV dosyalarını yaz.
-        Tüm olayların listesini döndürür.
+        Closes any lingering incident at stream termination and writes final files.
+        Returns list of all recorded events.
         """
         with self._lock:
             if self._in_event and self._current_event:
@@ -264,7 +261,6 @@ class EventLogger:
                 self._current_event = None
                 self._append_event_to_files(event)
 
-        # Son JSON yaz
         with open(self._json_path, "w", encoding="utf-8") as f:
             json.dump([e.to_dict() for e in self._events], f, ensure_ascii=False, indent=2)
 
@@ -284,12 +280,11 @@ class EventLogger:
         return self._csv_path
 
     def set_event_llm_summary(self, event_id: int, summary: str) -> None:
-        """LLM özeti üretildikten sonra ilgili olaya eklenir."""
+        """Attaches generated LLM assessment to the specified incident."""
         with self._lock:
             for ev in self._events:
                 if ev.event_id == event_id:
                     ev.llm_summary = summary
                     break
-            # JSON'u güncelle
             with open(self._json_path, "w", encoding="utf-8") as f:
                 json.dump([e.to_dict() for e in self._events], f, ensure_ascii=False, indent=2)

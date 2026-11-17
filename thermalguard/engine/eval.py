@@ -1,18 +1,17 @@
 """
-Değerlendirme (Evaluation) ve Ablasyon Analizi Modülü.
+Evaluation and Ablation Analysis Module.
 
-Saha Değerlendirme ve Performans Metrikleri:
---------------------------------------------
-1. **Frame-Level AUROC**: Videodaki her kare için anomali olup olmadığını ayırt etme başarısı.
-2. **Frame-Level PR-AUC / F1-Score**: Dengesiz veri setlerinde (anomali nadirdir)
-   gerçekçi performans göstergesi.
-3. **Pixel-Level AUROC**: Anomalinin karenin neresinde olduğunu (uzamsal lokalizasyon)
-   hata haritası üzerinden ölçer.
-4. **Termal Ön İşleme Ablasyonu**:
-   * Ham (Raw) Normalizasyon vs.
-   * Yalnızca CLAHE vs.
-   * Tam Termal Hat (AGC + FPN + Bilateral + CLAHE)
-   arasındaki AUROC ve Gürültü Dayanımı (Robustness) farkı.
+Field Evaluation and Performance Metrics:
+------------------------------------------
+1. **Frame-Level AUROC**: Ability to discriminate anomalous from normal frames across sequences.
+2. **Frame-Level PR-AUC / F1-Score**: Real-world performance under severe class imbalance
+   (where anomalies are rare occurrences).
+3. **Pixel-Level AUROC**: Evaluates spatial anomaly localization accuracy via error maps.
+4. **Thermal Preprocessing Ablation**:
+   * Raw Normalization vs.
+   * CLAHE only vs.
+   * Full Thermal Pipeline (AGC + FPN + Bilateral + CLAHE)
+   benchmarking robustness and AUROC retention under sensor degradation.
 """
 from __future__ import annotations
 
@@ -27,8 +26,8 @@ def compute_frame_metrics(
     labels: np.ndarray,
 ) -> Dict[str, float]:
     """
-    Kare düzeyinde AUROC, PR-AUC ve optimal F1 skorunu hesaplar.
-    Etiketi -1 olan (belirsiz) kareler değerlendirmeye dahil edilmez.
+    Computes frame-level AUROC, PR-AUC, and optimal F1 score.
+    Ambiguous frames (label == -1) are excluded from evaluation.
     """
     valid_mask = labels >= 0
     y_true = labels[valid_mask]
@@ -50,7 +49,7 @@ def compute_frame_metrics(
     precision, recall, pr_thresh = metrics.precision_recall_curve(y_true, y_score)
     pr_auc = float(metrics.auc(recall, precision))
 
-    # 3. Optimal Eşik & En İyi F1 Skoru
+    # 3. Optimal threshold & best F1 score
     f1_scores = 2 * (precision * recall) / (precision + recall + 1e-8)
     best_idx = np.nanargmax(f1_scores)
     best_f1 = float(f1_scores[best_idx])
@@ -66,11 +65,11 @@ def compute_frame_metrics(
 
 def compute_pixel_auroc(
     error_maps: np.ndarray,  # (N, H, W)
-    ground_truth_masks: np.ndarray,  # (N, H, W) ikili maske {0, 1}
-    sample_stride: int = 4,  # Hız için pikselleri alt-örnekle
+    ground_truth_masks: np.ndarray,  # (N, H, W) binary mask {0, 1}
+    sample_stride: int = 4,  # Subsample pixels for high evaluation speed
 ) -> float:
     """
-    Piksel bazında lokalizasyon AUROC değerini hesaplar.
+    Computes pixel-level anomaly localization AUROC.
     """
     sub_maps = error_maps[:, ::sample_stride, ::sample_stride].ravel()
     sub_gt = ground_truth_masks[:, ::sample_stride, ::sample_stride].ravel()
@@ -87,10 +86,10 @@ def calibrate_normal_threshold(
     false_alarm_rate: float = 0.05,
 ) -> float:
     """
-    Sadece normal durumlardan alınan skorlara göre hedef yanlış alarm oranını
-    (örn. %5) sağlayacak eşik değerini belirler.
+    Calibrates operational detection threshold on normal frames to satisfy
+    a target false alarm rate (e.g., 5%).
     """
     assert len(normal_scores) > 0
-    # Eşik = normal skorların (100 - FAR) persentili
+    # Threshold = (100 - FAR) percentile of nominal scores
     p = 100.0 * (1.0 - false_alarm_rate)
     return float(np.percentile(normal_scores, p))

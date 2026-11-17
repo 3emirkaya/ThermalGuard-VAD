@@ -1,11 +1,11 @@
 """
-Gerçek Zamanlı Akış (Real-Time Streaming) Çıkarım Motoru.
+Real-Time Streaming Inference Engine.
 
-Kenar cihaz (Jetson Orin, Xavier, gömülü PC) kısıtlarına göre optimize edilmiştir:
-  * Rolling Buffer: Bellekte sadece son T kare tutulur.
-  * Tekil Encoder Geçişi: Her yeni gelen kare yalnızca 1 kez encoder'dan geçirilir.
-  * Durumlu Ön İşleme: AGC ve FPN ofsetleri kareler arasında saklanır.
-  * Anlık Gecikme (Latency) & FPS takibi.
+Optimized for edge computing constraints (NVIDIA Jetson, embedded x86/ARM devices):
+  * Rolling Temporal Buffer: Maintains only the last T frames in memory.
+  * Single Encoder Pass: Evaluates each incoming frame through encoder once.
+  * Stateful Preprocessing: Preserves AGC and FPN offset states across frames.
+  * Live Latency & FPS telemetry tracking.
 """
 from __future__ import annotations
 
@@ -26,21 +26,21 @@ from .anomaly import AnomalyScorer
 @dataclass
 class InferenceResult:
     frame_idx: int
-    raw_frame: np.ndarray          # Orijinal uint8 (H, W)
-    preprocessed: np.ndarray       # Ön işlenmiş float32 [0, 1] (H, W)
-    reconstructed: np.ndarray      # Model çıktısı float32 [0, 1] (H, W)
-    error_map: np.ndarray          # Hata haritası float32 (H, W)
-    anomaly_score: float           # Anlık anomali skoru
+    raw_frame: np.ndarray          # Original uint8 (H, W)
+    preprocessed: np.ndarray       # Preprocessed float32 [0, 1] (H, W)
+    reconstructed: np.ndarray      # Model output float32 [0, 1] (H, W)
+    error_map: np.ndarray          # Error map float32 (H, W)
+    anomaly_score: float           # Instantaneous anomaly score
     is_anomaly: bool               # score >= threshold
-    heatmap_bgr: np.ndarray        # Renkli ısı haritası uint8 (H, W, 3)
-    overlay_bgr: np.ndarray        # Termal görüntü + Isı haritası bindirmesi uint8 (H, W, 3)
-    latency_ms: float              # Çıkarım süresi (milisaniye)
-    fps: float                     # Anlık FPS
+    heatmap_bgr: np.ndarray        # Colormapped heatmap uint8 (H, W, 3)
+    overlay_bgr: np.ndarray        # Thermal image + Heatmap blend uint8 (H, W, 3)
+    latency_ms: float              # Inference latency in milliseconds
+    fps: float                     # Instantaneous processing speed (FPS)
 
 
 class StreamingInferenceEngine:
     """
-    Canlı video veya kare dizisi üzerinde kare-kare (frame-by-frame) çıkarım yapar.
+    Executes frame-by-frame streaming inference on live video feeds or image sequences.
     """
 
     def __init__(
@@ -86,37 +86,35 @@ class StreamingInferenceEngine:
     @torch.no_grad()
     def step(self, raw_frame: np.ndarray) -> InferenceResult:
         """
-        Yeni bir tekil kareyi işler ve anomali sonucunu döndürür.
+        Processes a single incoming frame and returns the comprehensive anomaly evaluation.
         """
         t_start = time.perf_counter()
         idx = self.frame_count
         self.frame_count += 1
 
-        # 1. Termal Ön İşleme (AGC, Gürültü Azaltma, CLAHE) -> float32 (H, W) ∈ [0, 1]
+        # 1. Thermal Preprocessing (AGC, Noise Reduction, CLAHE) -> float32 (H, W) in [0, 1]
         prep_frame = self.preprocessor(raw_frame)
         H, W = prep_frame.shape
 
-        # 2. Tensör formatına dönüştür: (B=1, T=1, C=1, H, W)
+        # 2. Convert to PyTorch Tensor: (B=1, T=1, C=1, H, W)
         tensor_frame = torch.from_numpy(prep_frame).view(1, 1, 1, H, W).to(self.device)
 
         self.buffer.append(tensor_frame)
         self.raw_buffer.append(raw_frame)
 
-        # Buffer henüz dolmadıysa (ilk T-1 kare)
+        # Pad initial temporal window if buffer has fewer than clip_len frames
         if len(self.buffer) < self.clip_len:
-            # Buffer'ı ilk kareyle doldurarak geçişi sağla
             pad_needed = self.clip_len - len(self.buffer)
             clip_tensor = torch.cat([self.buffer[0]] * pad_needed + list(self.buffer), dim=1)
         else:
-            # (1, T, 1, H, W)
             clip_tensor = torch.cat(list(self.buffer), dim=1)
 
-        # 3. Model İleri Geçiş (Spatio-Temporal Autoencoder)
-        # last_only=True ile sadece son kareyi üretir (çıkarım hızlandırma)
+        # 3. Model Forward Pass (Spatio-Temporal Autoencoder)
+        # last_only=True generates only the final time-step for accelerated inference
         recon_tensor = self.model(clip_tensor, last_only=True)  # (1, 1, 1, H, W)
         recon_np = recon_tensor[0, 0, 0].cpu().numpy()
 
-        # 4. Hata Haritası ve Anomali Skoru
+        # 4. Error Map & Anomaly Scoring
         target_np = prep_frame
         if self.has_weights:
             error_map = self.scorer.compute_error_map(target_np, recon_np)
@@ -142,18 +140,18 @@ class StreamingInferenceEngine:
                 self.scorer.smoothed_score = 0.65 * self.scorer.smoothed_score + 0.35 * raw_score
             score = float(self.scorer.smoothed_score)
 
-            # Slowly update background on static/normal pixels (diff < 25)
+            # Slowly update background model on static/normal pixels (diff < 25)
             mask = (diff < 25.0).astype(np.float32)
             self.bg_model = self.bg_model * (1.0 - 0.03 * mask) + raw_float * (0.03 * mask)
             recon_np = self.bg_model / 255.0
 
         is_anomaly = bool(score >= self.threshold)
 
-        # 5. Görselleştirme Hazırlığı (Heatmap & Overlay)
+        # 5. Visualization Preparation (Heatmap & Overlay)
         prep_u8 = (prep_frame * 255.0).astype(np.uint8)
         heatmap_bgr = self.scorer.generate_heatmap(error_map, colormap=cv2.COLORMAP_JET)
 
-        # Anomali maskesi (belirli hata eşiğinin üstündeki pikseller)
+        # Tactical anomaly segmentation mask (pixels exceeding local deviation threshold)
         pixel_threshold = max(float(np.mean(error_map) + 2.0 * np.std(error_map)), 0.05)
         thresh_mask = (error_map > pixel_threshold).astype(np.uint8) if is_anomaly else None
 

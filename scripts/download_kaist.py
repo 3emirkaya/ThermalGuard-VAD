@@ -1,18 +1,18 @@
 """
 KAIST Multispectral Pedestrian Benchmark — LWIR-only subset downloader.
 
-Sadece termal (LWIR) kanalı ve yaya anotasyonları indirilir; RGB kanalı
-bilinçli olarak atlanır (bu projede renk bilgisi kullanılmaz).
+Downloads thermal (LWIR) channel frames and pedestrian annotations exclusively;
+the RGB channel is intentionally skipped (color information is unused in this project).
 
-Kaynaklar (Hugging Face aynaları — orijinal: SoonminHwang/rgbt-ped-detection):
-  * Görüntüler : richidubey/KAIST-Multispectral-Pedestrian-Detection-Dataset
-  * Anotasyon  : sywise98/kaist-labels   (annotations-xml-new)
+Sources (Hugging Face mirrors of original: SoonminHwang/rgbt-ped-detection):
+  * Images      : richidubey/KAIST-Multispectral-Pedestrian-Detection-Dataset
+  * Annotations : sywise98/kaist-labels (annotations-xml-new)
 
-Örnek:
+Example:
     python scripts/download_kaist.py --seqs set00/V000 set03/V001 --stride 1
     python scripts/download_kaist.py --seqs set05 --stride 2 --out data/kaist
 
-Bağımlılık gerektirmez (yalnızca Python stdlib).
+Zero external dependencies (pure Python standard library).
 """
 from __future__ import annotations
 
@@ -43,14 +43,14 @@ def _get(url: str, retries: int = 4, timeout: int = 30):
             req = urllib.request.Request(url, headers=UA)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read(), dict(r.headers)
-        except Exception as e:  # noqa: BLE001 - ağ hatalarında yeniden dene
+        except Exception as e:  # noqa: BLE001 - retry transient network errors
             last = e
             time.sleep(1.5 * (i + 1))
     raise RuntimeError(f"GET failed: {url} ({last})")
 
 
 def list_tree(repo: str, path: str) -> list[dict]:
-    """HF tree API (sayfalı) — bir klasördeki tüm girdileri döndürür."""
+    """HF tree API (paginated) — lists all entries inside a directory."""
     url = f"{HF}/api/datasets/{repo}/tree/main/{urllib.parse.quote(path)}"
     out: list[dict] = []
     while url:
@@ -67,7 +67,7 @@ def resolve_url(repo: str, path: str) -> str:
 
 
 def expand_sequences(specs: list[str]) -> list[str]:
-    """'set00' -> tüm V klasörleri, 'set00/V001' -> aynen."""
+    """'set00' -> all V sequences, 'set00/V001' -> as-is."""
     seqs: list[str] = []
     for s in specs:
         s = s.strip("/")
@@ -79,7 +79,7 @@ def expand_sequences(specs: list[str]) -> list[str]:
                     if e["type"] == "directory" and re.match(r"V\d{3}$", e["path"].split("/")[-1]))
         if vs:
             seqs += [f"{s}/{v}" for v in vs]
-        else:  # bazı aynalarda set altında doğrudan lwir/ bulunur
+        else:
             seqs.append(s)
     return seqs
 
@@ -97,17 +97,17 @@ def download_file(url: str, dst: Path) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--seqs", nargs="+", default=["set00/V000"], help="setXX veya setXX/VYYY")
-    ap.add_argument("--out", default="data/kaist", help="çıktı kök klasörü")
-    ap.add_argument("--stride", type=int, default=1, help="her N. kareyi indir (1 = hepsi, 20 Hz)")
-    ap.add_argument("--max-frames", type=int, default=0, help="sekans başına üst sınır (0 = sınırsız)")
-    ap.add_argument("--no-ann", action="store_true", help="anotasyonları indirme")
+    ap.add_argument("--seqs", nargs="+", default=["set00/V000"], help="setXX or setXX/VYYY")
+    ap.add_argument("--out", default="data/kaist", help="output root folder")
+    ap.add_argument("--stride", type=int, default=1, help="sample every Nth frame (1 = all frames, 20 Hz)")
+    ap.add_argument("--max-frames", type=int, default=0, help="max frames per sequence (0 = unlimited)")
+    ap.add_argument("--no-ann", action="store_true", help="skip annotations download")
     ap.add_argument("--workers", type=int, default=16)
     args = ap.parse_args()
 
     out = Path(args.out)
     seqs = expand_sequences(args.seqs)
-    print(f"[i] {len(seqs)} sekans: {', '.join(seqs)}")
+    print(f"[i] {len(seqs)} sequence(s): {', '.join(seqs)}")
 
     for seq in seqs:
         lwir_dir = f"{IMG_ROOT}/{seq}/lwir"
@@ -134,8 +134,12 @@ def main() -> None:
                     if n_err < 5:
                         print(f"   ! {e}", file=sys.stderr)
                 if i % 200 == 0 or i == len(jobs):
-                    print(f"\r[{seq}] {i}/{len(jobs)} dosya  ({time.time() - t0:.0f}s)", end="", flush=True)
-        print(f"\n[{seq}] tamam: {len(files)} kare, {n_new} yeni dosya, {n_err} hata")
+                    print(f"\r[{seq}] {i}/{len(jobs)} files ({time.time() - t0:.0f}s)", end="", flush=True)
+        print(f"\n[{seq}] complete: {len(files)} frames, {n_new} new files, {n_err} errors")
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

@@ -1,16 +1,16 @@
 """
-ThermalGuard-VAD — Saha Kısıtları, Termal Ön İşleme ve Donanım Karşılaştırma Betiği (Benchmark).
+ThermalGuard-VAD — Field Constraints, Thermal Preprocessing, and Hardware Benchmark Script.
 
-Saha Kısıtları ve Mühendislik Karşılaştırmaları:
-------------------------------------------------
-1. **Ön İşleme Ablasyonu (Preprocessing Ablation)**:
-   * Düzenek A (Ham / Raw): Yalnızca Min-Max normalizasyon (Standard RGB yaklaşımı hatası).
-   * Düzenek B (Yalnızca CLAHE): Gürültü filtresiz CLAHE (gürültüyü de büyütür).
-   * Düzenek C (ThermalGuard Tam Hat): AGC + Ölü Piksel + FPN Çizgi Giderme + Bilateral Filtre + CLAHE.
-2. **Sensör Gürültü Dayanımı (Noise Robustness)**:
-   * Temiz Sensör vs Saha Koşulları (Sis / Düşük Kontrast, 60mK NETD gürültüsü, Sabit Desen Gürültüsü).
-3. **Kenar Cihaz Çıkarım Telemetrisi**:
-   * Ortalama Gecikme (Latency ms) ve FPS analizi.
+Field Constraints and Engineering Benchmarks:
+---------------------------------------------
+1. **Preprocessing Ablation**:
+   * Pipeline A (Raw): Min-Max normalization only (flawed naive RGB approach).
+   * Pipeline B (CLAHE only): Unfiltered CLAHE (amplifies sensor noise).
+   * Pipeline C (ThermalGuard Full Pipeline): AGC + Dead Pixel + FPN Destripe + Bilateral Filter + CLAHE.
+2. **Sensor Noise Robustness**:
+   * Clean Sensor vs. Harsh Field Conditions (Fog / Low Contrast, 60mK NETD noise, Fixed Pattern Noise).
+3. **Edge Device Inference Telemetry**:
+   * Average Latency (ms) and Throughput (FPS) analysis.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-# Windows cp1252 terminal uyumluluğu
+# Terminal utf-8 configuration
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -40,7 +40,7 @@ except ImportError:
             res += " | ".join(str(x) for x in r) + "\n"
         return res
 
-# Proje kökünü sys.path'e ekle
+# Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from thermalguard.data.synthetic import AnomalyEvent, ThermalPerimeterSimulator
@@ -108,7 +108,7 @@ def run_single_experiment(
         scores.append(res.anomaly_score)
         error_maps.append(res.error_map)
 
-        # Ön işleme kalite metrikleri
+        # Preprocessing quality metrics
         contrast_list.append(rms_contrast(res.preprocessed))
         noise_list.append(estimate_noise_sigma(res.preprocessed))
         entropy_list.append(entropy(res.preprocessed))
@@ -128,7 +128,7 @@ def run_single_experiment(
         "rms_contrast": float(np.mean(contrast_list)),
         "noise_sigma": float(np.mean(noise_list)),
         "entropy": float(np.mean(entropy_list)),
-        "latency_ms": float(np.mean(latencies[5:])),  # Isınma sonrası
+        "latency_ms": float(np.mean(latencies[5:])),  # Post warm-up
         "fps": 1000.0 / max(float(np.mean(latencies[5:])), 1e-4),
     }
 
@@ -136,16 +136,16 @@ def run_single_experiment(
 def main():
     args = parse_args()
     device = torch.device(args.device) if args.device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[i] Benchmark Başlatıldı | Donanım: {device}")
+    print(f"[i] Benchmark Initialized | Hardware: {device}")
 
-    # Model başlat (Ağırlık varsa yükle, yoksa sıfırdan mimariyi test et)
+    # Initialize model
     model_cfg = {"widths": (16, 32, 64, 96), "latent": 64, "lstm_hidden": (64, 64), "objective": "reconstruct"}
     model = build_model(model_cfg).to(device)
     if os.path.isfile(args.weights):
         ckpt = torch.load(args.weights, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state"])
 
-    # Test Sekansı Üret (Sınır ihlali senaryosu)
+    # Generate benchmark test sequence (perimeter intrusion scenario)
     sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=args.num_frames, seed=42)
     anomalies = [
         AnomalyEvent(start_frame=50, end_frame=115, anomaly_type="intruder", start_pos=(0.1, 0.65), end_pos=(0.9, 0.68))
@@ -153,17 +153,17 @@ def main():
     raw_frames, gt_labels, gt_masks = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=False)
 
     print("\n" + "=" * 80)
-    print("  1. TERMAL ÖN İŞLEME VE SAHA DAYANIKLILIK ABLASYON TESTİ")
+    print("  1. THERMAL PREPROCESSING AND FIELD ROBUSTNESS ABLATION BENCHMARK")
     print("=" * 80)
 
-    # Karşılaştırılacak Düzenekler
+    # Evaluated pipeline configurations
     pipelines = [
-        ("A: Ham (Raw Normalization)", ThermalPreprocessConfig.raw(), None),
-        ("B: Yalnızca CLAHE (Filtresiz)", ThermalPreprocessConfig(clahe=True, denoise="none", dead_pixel=False, destripe=False), None),
-        ("C: ThermalGuard Tam Hat", ThermalPreprocessConfig(clahe=True, denoise="bilateral", dead_pixel=True, destripe=True), None),
-        # Saha Bozulması Eklenmiş Zorlayıcı Test (Sis, Düşük Kontrast, Yüksek NETD Gürültüsü)
-        ("A*: Ham + Saha Gürültüsü", ThermalPreprocessConfig.raw(), ThermalDegrader(DegradationConfig.level(2, seed=12))),
-        ("C*: ThermalGuard + Saha Gürültüsü", ThermalPreprocessConfig(clahe=True, denoise="bilateral", dead_pixel=True, destripe=True),
+        ("A: Raw (Min-Max Normalization)", ThermalPreprocessConfig.raw(), None),
+        ("B: CLAHE Only (Unfiltered)", ThermalPreprocessConfig(clahe=True, denoise="none", dead_pixel=False, destripe=False), None),
+        ("C: ThermalGuard Full Pipeline", ThermalPreprocessConfig(clahe=True, denoise="bilateral", dead_pixel=True, destripe=True), None),
+        # Harsh field condition tests (Fog, low contrast, elevated NETD noise)
+        ("A*: Raw + Field Sensor Noise", ThermalPreprocessConfig.raw(), ThermalDegrader(DegradationConfig.level(2, seed=12))),
+        ("C*: ThermalGuard + Field Sensor Noise", ThermalPreprocessConfig(clahe=True, denoise="bilateral", dead_pixel=True, destripe=True),
          ThermalDegrader(DegradationConfig.level(2, seed=12))),
     ]
 
@@ -171,7 +171,7 @@ def main():
     table_rows = []
 
     for name, cfg, degrader in pipelines:
-        print(f"[...] Test ediliyor: {name}...")
+        print(f"[...] Benchmarking: {name}...")
         res = run_single_experiment(name, cfg, degrader, raw_frames, gt_labels, gt_masks, model, device)
         results.append(res)
         table_rows.append([
@@ -185,14 +185,18 @@ def main():
             f"{res['fps']:.1f}",
         ])
 
-    headers = ["Düzenek / Hat", "AUROC", "PR-AUC", "Piksel-AUC", "Kontrast", "Gürültü σ", "Gecikme", "FPS"]
+    headers = ["Pipeline / Setup", "AUROC", "PR-AUC", "Pixel-AUC", "Contrast", "Noise \u03c3", "Latency", "FPS"]
     table_str = tabulate(table_rows, headers=headers, tablefmt="github")
     print("\n" + table_str + "\n")
 
-    # JSON olarak kaydet
+    # Save to JSON
     with open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"[✓] Detaylı benchmark sonuçları kaydedildi: {args.out_json}")
+    print(f"[✓] Detailed benchmark results saved: {args.out_json}")
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":

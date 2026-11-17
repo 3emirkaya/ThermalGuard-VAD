@@ -16,45 +16,45 @@ from thermalguard.preprocessing.thermal import (
 
 
 def test_thermal_preprocessor_shape_and_range():
-    # 640x512 rastgele termal kare
+    # 640x512 random thermal frame
     frame = np.random.randint(50, 180, (512, 640), dtype=np.uint8)
     cfg = ThermalPreprocessConfig(output_size=(160, 128), clahe=True, denoise="bilateral")
     pp = ThermalPreprocessor(cfg)
 
     out = pp(frame)
-    assert out.shape == (128, 160), f"Beklenen şekil (128, 160), alınan: {out.shape}"
+    assert out.shape == (128, 160), f"Expected shape (128, 160), got: {out.shape}"
     assert out.dtype == np.float32
     assert 0.0 <= out.min() and out.max() <= 1.0
 
 
 def test_16bit_radiometric_support():
-    # 14/16-bit ham radyometrik kamera çıktısı (örn. 8000 - 12000 dijital seviye)
+    # 14/16-bit raw radiometric camera output (e.g. 8000 - 12000 digital levels)
     raw_16bit = np.random.randint(8000, 12000, (512, 640), dtype=np.uint16)
     pp = ThermalPreprocessor(ThermalPreprocessConfig(output_size=(160, 128)))
     out = pp(raw_16bit)
     assert out.shape == (128, 160)
     assert out.dtype == np.float32
-    assert out.max() > 0.5  # AGC ile 8-bit aralığına doğru ölçeklenmeli
+    assert out.max() > 0.5  # AGC must scale dynamically to [0, 1]
 
 
 def test_clahe_contrast_enhancement():
-    # Çok düşük kontrastlı termal sis karesi
+    # Very low contrast thermal fog scene
     low_contrast = np.full((128, 160), 100, dtype=np.uint8)
-    low_contrast[40:80, 50:110] = 104  # Yalnızca 4 birimlik ısı farkı
+    low_contrast[40:80, 50:110] = 104  # Only 4 counts temperature difference
 
     c_before = rms_contrast(low_contrast)
     clahe_out = apply_clahe(low_contrast, clip=3.0, grid=(8, 8))
     c_after = rms_contrast(clahe_out)
 
-    assert c_after > c_before, "CLAHE kontrastı artırmalıdır!"
+    assert c_after > c_before, "CLAHE must improve local contrast!"
 
 
 def test_dead_pixel_correction():
     img = np.full((64, 64), 100, dtype=np.uint8)
-    # 3 adet ölü/sıcak piksel yerleştir
-    img[10, 10] = 255  # Sıcak
-    img[20, 20] = 0    # Ölü
-    img[30, 30] = 250  # Sıcak
+    # Inject 3 dead/hot defective pixels
+    img[10, 10] = 255  # Hot
+    img[20, 20] = 0    # Dead
+    img[30, 30] = 250  # Hot
 
     corrected = correct_dead_pixels(img, thresh=40.0)
     assert corrected[10, 10] == 100
@@ -64,14 +64,14 @@ def test_dead_pixel_correction():
 
 def test_destripe_fpn():
     img = np.full((64, 64), 120, dtype=np.uint8)
-    # Sütun bazlı FPN çizgisi ekle
+    # Add column-based FPN stripe artifacts
     img[:, 15] = 180
     img[:, 35] = 70
 
     col_off, row_off = estimate_stripe_offsets(img, sigma=8.0)
     destriped = remove_stripes(img, col_off, row_off)
 
-    # Çizgi pikselleri arka plana yaklaşmalı
+    # Defective columns must be restored close to background
     assert abs(int(destriped[0, 15]) - 120) < 15
     assert abs(int(destriped[0, 35]) - 120) < 15
 

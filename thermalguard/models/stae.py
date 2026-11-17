@@ -1,25 +1,25 @@
 """
-Spatio-Temporal Autoencoder (STAE) — ConvLSTM darboğazlı.
+Spatio-Temporal Autoencoder (STAE) with ConvLSTM bottleneck.
 
-Mimari (varsayılan, giriş 1×128×160, T=8):
+Architecture (default, input 1x128x160, T=8):
 
-    kare_t ─► [2D CNN Encoder, zaman boyunca ağırlık paylaşımlı]  (1/16 çözünürlük, 8×10)
-                │
-                ▼
-          ConvLSTM ×2  (zamansal dinamik: hareket deseni, ısı değişimi)
-                │   h_t
-                ▼
-          [2D CNN Decoder]  ─►  x̂_t   (yeniden üretilen kare)
+    frame_t -> [2D CNN Encoder, weight-shared across time]  (1/16 resolution, 8x10)
+                 |
+                 v
+           ConvLSTM x2  (temporal dynamics: motion patterns, thermal evolution)
+                 |   h_t
+                 v
+           [2D CNN Decoder]  ->  x_hat_t   (reconstructed frame)
 
-* **Atlamalı bağlantı (skip) YOK** — aksi halde ağ anomaliyi de "kopyalar" ve
-  yeniden üretim hatası anlamını yitirir. Darboğaz (64×8×10 = 5120) girişin
-  (20480) %25'i kadardır.
-* İki hedef desteklenir:
-    - ``reconstruct``: x_{1..T} → x̂_{1..T}  (nedensel; x̂_t yalnızca ≤t karelere bakar)
-    - ``predict``    : x_{1..T} → x̂_{T+1}   (gelecek kare tahmini)
-* **Akış (streaming) optimizasyonu**: encoder kare bazlı olduğu için canlı
-  çıkarımda her yeni karede yalnızca 1 encoder geçişi yapılır; son T karenin
-  öznitelikleri önbellekte tutulur (bkz. ``encode_frame`` / ``forward_from_features``).
+* **NO skip connections** - otherwise the network copies anomalies directly,
+  destroying the anomaly reconstruction error signal. The bottleneck (64x8x10 = 5120)
+  is ~25% of input dimensionality (20480).
+* Two objectives supported:
+    - ``reconstruct``: x_{1..T} -> x_hat_{1..T}  (causal; x_hat_t only attends to <= t frames)
+    - ``predict``    : x_{1..T} -> x_hat_{T+1}   (future frame prediction)
+* **Streaming optimization**: since encoder is per-frame, live inference only requires
+  1 encoder pass per incoming frame; latent features of the last T frames are cached
+  (see ``encode_frame`` / ``forward_from_features``).
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def _down(cin, cout):
 
 
 def _up(cin, cout):
-    # Upsample + conv: ConvTranspose'a göre damalı (checkerboard) artefakt üretmez.
+    # Upsample + conv avoids checkerboard artifacts compared to transposed convolution.
     return nn.Sequential(nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
                          _conv(cin, cout, 3, 1), _conv(cout, cout, 3, 1))
 
@@ -98,7 +98,7 @@ class STAE(nn.Module):
         return z.view(B, T, *z.shape[1:])
 
     def forward_from_features(self, z: torch.Tensor, last_only: bool = False) -> torch.Tensor:
-        """ConvLSTM + decoder. ``last_only`` → yalnızca son zaman adımını çöz (çıkarım)."""
+        """ConvLSTM + decoder. ``last_only`` -> decodes only the last temporal step (inference)."""
         h_seq, _ = self.temporal(z)
         if last_only or self.objective == "predict":
             return self.decoder(h_seq[:, -1]).unsqueeze(1)          # (B, 1, C, H, W)
@@ -112,12 +112,12 @@ class STAE(nn.Module):
     # ------------------------------------------------------------------ #
     @torch.no_grad()
     def encode_frame(self, frame: torch.Tensor) -> torch.Tensor:
-        """Tek kare (B, C, H, W) → latent (B, latent, h, w) — akış önbelleği için."""
+        """Single frame (B, C, H, W) -> latent (B, latent, h, w) for streaming cache."""
         return self.encoder(frame)
 
 
 class STAEExportWrapper(nn.Module):
-    """ONNX/TensorRT dışa aktarımı için: (B, T, 1, H, W) → son karenin yeniden üretimi (B, 1, H, W)."""
+    """Wrapper for ONNX/TensorRT export: (B, T, 1, H, W) -> last frame reconstruction (B, 1, H, W)."""
 
     def __init__(self, model: STAE):
         super().__init__()
@@ -141,7 +141,7 @@ def count_parameters(model: nn.Module) -> int:
 
 
 # --------------------------------------------------------------------------- #
-#  Kayıp fonksiyonları
+#  Loss functions
 # --------------------------------------------------------------------------- #
 def _gaussian_window(size: int, sigma: float, device, dtype):
     g = torch.arange(size, device=device, dtype=dtype) - size // 2
@@ -151,7 +151,7 @@ def _gaussian_window(size: int, sigma: float, device, dtype):
 
 
 def ssim_map(x: torch.Tensor, y: torch.Tensor, size: int = 7, sigma: float = 1.5) -> torch.Tensor:
-    """(N, 1, H, W) ∈ [0,1] → SSIM haritası (N, 1, H, W)."""
+    """(N, 1, H, W) in [0,1] -> SSIM map (N, 1, H, W)."""
     w = _gaussian_window(size, sigma, x.device, x.dtype)
     pad = size // 2
     mu_x = F.conv2d(x, w, padding=pad)
@@ -164,7 +164,7 @@ def ssim_map(x: torch.Tensor, y: torch.Tensor, size: int = 7, sigma: float = 1.5
 
 
 class ReconstructionLoss(nn.Module):
-    """L = MSE + λ_ssim · (1 − SSIM). SSIM terimi bulanık (ortalama) çıktıları cezalandırır."""
+    """L = MSE + lambda_ssim * (1 - SSIM). The SSIM term penalizes blurred mean predictions."""
 
     def __init__(self, ssim_weight: float = 0.2):
         super().__init__()
