@@ -176,16 +176,43 @@ class ThermalPerimeterSimulator:
                     y1 = int(np.clip(cy + bh / 2, 0, h))
 
                     if x1 > x0 and y1 > y0:
-                        # İnsan vücut ısısı gradyanı (gövde en sıcak, kenarlar daha ılık)
-                        target_patch = np.zeros((y1 - y0, x1 - x0), dtype=np.float32)
                         py, px = np.ogrid[: y1 - y0, : x1 - x0]
                         center_y, center_x = (y1 - y0) / 2.0, (x1 - x0) / 2.0
-                        rad = ((px - center_x) / (bw / 2.0 + 1e-5)) ** 2 + ((py - center_y) / (bh / 2.0 + 1e-5)) ** 2
-                        heat_blob = np.exp(-1.5 * rad) * anom.intensity
 
-                        # Termal hedefi arka plana kaynaştır (maksimum sıcaklık)
-                        frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
-                        frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.0, 1, 0)
+                        if anom.anomaly_type == "vehicle":
+                            # Taktik Motorlu Araç: Gövde, sıcak motor bloğu ve sıcak tekerlekler
+                            rad = ((px - center_x) / (bw / 2.0 + 1e-5)) ** 4 + ((py - center_y) / (bh / 2.0 + 1e-5)) ** 2
+                            heat_blob = np.exp(-1.1 * rad) * (anom.intensity * 0.85)
+
+                            # Motor bloğu (gidiş yönüne göre ön kısım)
+                            is_fwd = anom.end_pos[0] >= anom.start_pos[0]
+                            eng_x = (x1 - x0) * (0.75 if is_fwd else 0.25)
+                            eng_rad = ((px - eng_x) / (bw * 0.26 + 1e-5)) ** 2 + ((py - center_y) / (bh * 0.4 + 1e-5)) ** 2
+                            heat_blob = np.maximum(heat_blob, np.exp(-1.8 * eng_rad) * anom.intensity)
+
+                            # Sıcak tekerlekler (alt sol ve sağ)
+                            wheel_y = (y1 - y0) * 0.78
+                            for w_rel in [0.22, 0.78]:
+                                wx = (x1 - x0) * w_rel
+                                w_rad = ((px - wx) / (bw * 0.16 + 1e-5)) ** 2 + ((py - wheel_y) / (bh * 0.25 + 1e-5)) ** 2
+                                heat_blob = np.maximum(heat_blob, np.exp(-2.5 * w_rad) * (anom.intensity * 0.95))
+
+                            frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
+                            frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.2, 1, 0)
+
+                        elif anom.anomaly_type in ("crawler", "crawling_intruder"):
+                            # Düşük Profil Sürünen Sabotajcı / İntikal
+                            rad = ((px - center_x) / (bw / 2.0 + 1e-5)) ** 2 + ((py - center_y) / (bh / 2.0 + 1e-5)) ** 2
+                            heat_blob = np.exp(-1.4 * rad) * anom.intensity
+                            frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
+                            frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.0, 1, 0)
+
+                        else:
+                            # İnsan vücut ısısı gradyanı (gövde en sıcak, kenarlar daha ılık)
+                            rad = ((px - center_x) / (bw / 2.0 + 1e-5)) ** 2 + ((py - center_y) / (bh / 2.0 + 1e-5)) ** 2
+                            heat_blob = np.exp(-1.5 * rad) * anom.intensity
+                            frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
+                            frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.0, 1, 0)
 
             # Sensör kusurları ekle
             if add_sensor_defects:

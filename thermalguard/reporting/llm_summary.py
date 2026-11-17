@@ -53,6 +53,7 @@ def _build_user_prompt(event: AnomalyEvent, fps: float = 20.0) -> str:
     duration_s = event.duration_frames / max(fps, 1.0)
     anomaly_name_map = {
         "intruder": "warm human silhouette (potential infiltration)",
+        "crawler": "low-profile crawling saboteur / prone infiltrator near fence",
         "vehicle": "rapid vehicle thermal heat signature",
         "heat_source": "static thermal source / unattended suspicious object",
         "unknown": "unidentified thermal anomaly",
@@ -81,6 +82,7 @@ def _rule_based_summary(event: AnomalyEvent, fps: float = 20.0) -> str:
 
     type_desc = {
         "intruder": "warm human silhouette detected in infrared spectrum (potential perimeter intrusion)",
+        "crawler": "low-profile crawling saboteur detected hugging perimeter fence line",
         "vehicle": "rapid vehicle thermal signature detected approaching boundary",
         "heat_source": "stationary suspicious thermal signature / abandoned object detected",
         "unknown": "thermal anomaly detected in surveillance sector",

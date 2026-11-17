@@ -136,6 +136,8 @@ app = Flask(__name__)
 def run_stream_thread(source_type: str = "synthetic", source_param: str = "", llm_backend: str = "rule", loop: bool = True):
     """Canlı kamera, video, KAIST sekansı veya sentetik demoyu arka planda çalıştırır."""
     state.status = "running"
+    state.is_running = True
+    state.is_paused = False
     state.frame_count = 0
     state.anomaly_count = 0
     state.events = []
@@ -300,6 +302,98 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
                 if not loop:
                     break
 
+        elif source_type == "vehicle_night":
+            npy_v = "data/synthetic_vehicle_220.npy"
+            if os.path.isfile(npy_v):
+                raw_frames = np.load(npy_v)
+            else:
+                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=77)
+                anomalies = [
+                    SimAnomalyEvent(
+                        start_frame=50, end_frame=155,
+                        anomaly_type="vehicle",
+                        start_pos=(0.02, 0.72), end_pos=(0.98, 0.70),
+                        size=(38, 20), intensity=248.0,
+                    )
+                ]
+                raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
+                try:
+                    np.save(npy_v, raw_frames)
+                except Exception:
+                    pass
+
+            iteration = 0
+            while state.is_running:
+                for i, raw_frame in enumerate(raw_frames):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+
+                    res = engine.step(raw_frame)
+                    is_anom = (50 <= i <= 155)
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="vehicle" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.048)  # ~21 FPS
+
+                iteration += 1
+                if not loop:
+                    break
+
+        elif source_type == "crawler":
+            npy_c = "data/synthetic_crawler_220.npy"
+            if os.path.isfile(npy_c):
+                raw_frames = np.load(npy_c)
+            else:
+                sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=99)
+                anomalies = [
+                    SimAnomalyEvent(
+                        start_frame=60, end_frame=160,
+                        anomaly_type="crawler",
+                        start_pos=(0.05, 0.63), end_pos=(0.90, 0.65),
+                        size=(26, 12), intensity=238.0,
+                    )
+                ]
+                raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
+                try:
+                    np.save(npy_c, raw_frames)
+                except Exception:
+                    pass
+
+            iteration = 0
+            while state.is_running:
+                for i, raw_frame in enumerate(raw_frames):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+
+                    res = engine.step(raw_frame)
+                    is_anom = (60 <= i <= 160)
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="crawler" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.048)  # ~21 FPS
+
+                iteration += 1
+                if not loop:
+                    break
+
         elif source_type == "synthetic":
             sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42)
             anomalies = [
@@ -312,25 +406,31 @@ def run_stream_thread(source_type: str = "synthetic", source_param: str = "", ll
             ]
             raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
 
-            for i, raw_frame in enumerate(raw_frames):
-                while state.is_paused and state.is_running:
-                    time.sleep(0.08)
-                if not state.is_running:
+            iteration = 0
+            while state.is_running:
+                for i, raw_frame in enumerate(raw_frames):
+                    while state.is_paused and state.is_running:
+                        time.sleep(0.08)
+                    if not state.is_running:
+                        break
+
+                    res = engine.step(raw_frame)
+                    is_anom = (60 <= i <= 135)
+
+                    logger.update(
+                        frame_idx=res.frame_idx,
+                        is_anomaly=res.is_anomaly,
+                        anomaly_score=res.anomaly_score,
+                        anomaly_type="intruder" if is_anom else "normal",
+                    )
+
+                    hud = visualizer.render_frame(res)
+                    state.update_frame(hud, res)
+                    time.sleep(0.05)  # ~20 FPS
+
+                iteration += 1
+                if not loop:
                     break
-
-                res = engine.step(raw_frame)
-                anomaly_type = anomalies[0].anomaly_type if 60 <= i <= 135 else "normal"
-
-                logger.update(
-                    frame_idx=res.frame_idx,
-                    is_anomaly=res.is_anomaly,
-                    anomaly_score=res.anomaly_score,
-                    anomaly_type="intruder" if 60 <= i <= 135 else "unknown",
-                )
-
-                hud = visualizer.render_frame(res)
-                state.update_frame(hud, res)
-                time.sleep(0.05)  # ~20 FPS
 
         elif source_type == "kaist":
             kaist_dir = "data/kaist/images/set00/V000/lwir"
@@ -846,6 +946,50 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       font-size: 13px;
     }
 
+    /* Inline Report & Audit Section */
+    .report-section {
+      margin: 0 24px 24px 24px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .report-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .report-stat-card {
+      padding: 14px;
+      border-radius: 8px;
+      background: var(--card-subtle);
+      border: 1px solid var(--border);
+    }
+
+    @media print {
+      header, footer, .column-left, .column-right, #source-select, #llm-select, .btn, .header-controls {
+        display: none !important;
+      }
+      body, main {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+      .report-section {
+        display: block !important;
+        border: none !important;
+        box-shadow: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      .report-stat-card {
+        border: 1px solid #cbd5e1 !important;
+        background: #f8fafc !important;
+        color: #0f172a !important;
+      }
+    }
+
     /* Footer */
     footer {
       border-top: 1px solid var(--border);
@@ -876,11 +1020,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     <!-- Video / Kamera Kaynağı -->
     <select id="source-select" title="Görüntü Kaynağı" onchange="onSourceChange()">
-      <option value="ornek_1" selected>🎬 İndirilen Video (Ornek-Veri-1-Termal.mp4)</option>
-      <option value="synthetic">🎯 Sentetik Termal Simülatör (Demo)</option>
+      <option value="ornek_1" selected>🎬 Saha Videosu (Ornek-Veri-1-Termal.mp4)</option>
+      <option value="vehicle_night">🚜 Gece Sınır Hattı — Taktik Araç Sızması (Mechanized Breach)</option>
+      <option value="crawler">🥷 Kritik Tesis — Sürünen Şüpheli Sızma (Crawling Saboteur)</option>
+      <option value="synthetic">🎯 Sentetik Termal Simülatör (Tel Örgü Yaya Sızması)</option>
+      <option value="kaist">📁 KAIST Termal Veri Seti (İndirme Gerekir)</option>
       <option value="webcam_0">📹 Canlı Kamera (Webcam 0)</option>
       <option value="webcam_1">📹 Harici Kamera / USB Termal (Cam 1)</option>
-      <option value="kaist">📁 KAIST Termal Veri Seti (İndirme Gerekir)</option>
       <option value="rtsp">🌐 RTSP IP Termal Kamera</option>
       <option value="custom">📂 Özel Dosya / Klasör Yolu</option>
     </select>
@@ -905,7 +1051,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button id="pause-btn" class="btn btn-secondary" onclick="pauseStream()" style="display:none" title="Akışı duraklat">⏸️ Duraklat</button>
     <button id="resume-btn" class="btn btn-primary" onclick="resumeStream()" style="display:none" title="Kaldığı yerden devam et">▶️ Devam Et</button>
     <button id="stop-btn" class="btn btn-danger" onclick="stopDemo()" style="display:none" title="Akışı sıfırla/durdur">⏹️ Durdur</button>
-    <a href="/report" target="_blank" class="btn btn-secondary">Report</a>
+    <button type="button" class="btn btn-secondary" onclick="scrollToReport()" title="Sayfa altındaki taktiksel denetim raporuna git">📋 Denetim Raporu</button>
     <button id="theme-btn" class="btn btn-icon" onclick="toggleTheme()" title="Light/Dark Theme">🌙</button>
   </div>
 </header>
@@ -980,6 +1126,62 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </main>
 
+<!-- INLINE REPORT & AUDIT SECTION -->
+<section class="card report-section" id="report-section">
+  <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+    <div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 16px;">📋</span>
+        <span class="card-title" style="font-size: 16px;">Taktiksel Olay ve Denetim Raporu</span>
+        <span class="badge" style="background: rgba(37, 99, 235, 0.15); color: var(--accent-blue); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">CANLI DENETİM</span>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+        SAYZEK Sınır Güvenliği &bull; Gerçek Zamanlı LWIR Anomali Analizi ve LLM Güvenlik Değerlendirmeleri
+      </div>
+    </div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <button type="button" class="btn btn-secondary" onclick="window.print()" title="Raporu yazdır veya PDF olarak kaydet">🖨️ Yazdır / PDF</button>
+      <a href="/report" target="_blank" class="btn btn-secondary" title="Ayrı sekmede tam sayfa raporu görüntüle">↗️ Ayrı Sekmede Aç</a>
+    </div>
+  </div>
+  <div class="card-body" style="padding: 20px;">
+    <!-- Stats Row -->
+    <div class="report-stats-grid">
+      <div class="report-stat-card">
+        <div class="metric-label">TOPLAM TARANAN KARE</div>
+        <div class="metric-number" id="rep-total-frames">0</div>
+        <div class="metric-unit">kare incelendi</div>
+      </div>
+      <div class="report-stat-card">
+        <div class="metric-label">TESPİT EDİLEN ANOMALİ</div>
+        <div class="metric-number" id="rep-event-count" style="color: var(--accent-red);">0</div>
+        <div class="metric-unit">olay kaydı</div>
+      </div>
+      <div class="report-stat-card">
+        <div class="metric-label">ANOMALİ KARELERİ</div>
+        <div class="metric-number" id="rep-anom-frames" style="color: var(--accent-red);">0</div>
+        <div class="metric-unit">ihlalli an</div>
+      </div>
+      <div class="report-stat-card">
+        <div class="metric-label">ORTALAMA İŞLEME HIZI</div>
+        <div class="metric-number" id="rep-fps" style="color: var(--accent-green);">0.0</div>
+        <div class="metric-unit">FPS / Gerçek Zamanlı</div>
+      </div>
+    </div>
+
+    <!-- Events List / Table -->
+    <div style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+      <span>TESPİT EDİLEN İHLAL VE GÜVENLİK OLAYLARI</span>
+      <span id="rep-events-badge" style="font-size: 11px; color: var(--text-muted);">0 Kayıt</span>
+    </div>
+    <div id="inline-report-events" style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="no-events" style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--card-subtle); border: 1px dashed var(--border); border-radius: 6px;">
+        Henüz anomali olayı kaydedilmedi. Video akışı başlatıldığında tespit edilen sızma olayları ve LLM taktiksel özetleri buraya anında yansıtılacaktır.
+      </div>
+    </div>
+  </div>
+</section>
+
 <footer>
   <span>ThermalGuard-VAD &bull; Perimeter Anomaly Detection System</span>
   <span>Spatio-Temporal Autoencoder + ConvLSTM</span>
@@ -1012,6 +1214,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
       // Sayfa ilk yüklendiğinde akış durumunu senkronize et
       fetch('/api/status').then(r => r.json()).then(s => {
+        updateStatus(s);
         if (s.status === 'running') {
           document.getElementById('start-btn').style.display = 'none';
           document.getElementById('stop-btn').style.display = 'inline-flex';
@@ -1022,6 +1225,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           document.getElementById('start-btn').disabled = false;
           document.getElementById('stop-btn').style.display = 'none';
         }
+      }).catch(() => {});
+
+      fetch('/api/events').then(r => r.json()).then(events => {
+        renderInlineReport(events);
       }).catch(() => {});
     });
   })();
@@ -1086,7 +1293,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     let source = sourceSel;
     let param = '';
 
-    if (sourceSel === 'ornek_1') {
+    if (sourceSel === 'vehicle_night') {
+      source = 'vehicle_night';
+    } else if (sourceSel === 'crawler') {
+      source = 'crawler';
+    } else if (sourceSel === 'ornek_1') {
       source = 'ornek_1';
       param = 'data/Ornek-Veri-1-Termal.mp4';
     } else if (sourceSel === 'synthetic') {
@@ -1214,12 +1425,68 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     } catch (e) { /* network delay */ }
   }
 
+  function scrollToReport() {
+    const el = document.getElementById('report-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function renderInlineReport(events) {
+    const repFeed = document.getElementById('inline-report-events');
+    const repBadge = document.getElementById('rep-events-badge');
+    if (repBadge) repBadge.textContent = (events ? events.length : 0) + ' Kayıt';
+    if (!repFeed) return;
+
+    if (!events || events.length === 0) {
+      repFeed.innerHTML = `<div class="no-events" style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--card-subtle); border: 1px dashed var(--border); border-radius: 6px;">Henüz anomali olayı kaydedilmedi. Video akışı başlatıldığında tespit edilen sızma olayları ve LLM taktiksel özetleri buraya anında yansıtılacaktır.</div>`;
+      return;
+    }
+
+    repFeed.innerHTML = events.slice().reverse().map(ev => {
+      const startTime = ev.start_time ? ev.start_time.replace('T', ' ').substring(0, 19) : '-';
+      const durationSec = (ev.duration_frames / 20.0).toFixed(1);
+      const isCritical = ev.peak_score >= 0.5;
+      const badgeText = isCritical ? '🚨 KRİTİK ALARM' : '⚠️ ŞÜPHELİ İHLAL';
+      const badgeBg = isCritical ? 'var(--accent-red-bg)' : 'rgba(234, 179, 8, 0.15)';
+      const badgeColor = isCritical ? 'var(--accent-red)' : '#ca8a04';
+      const borderColor = isCritical ? 'var(--accent-red)' : '#eab308';
+
+      return `
+        <div style="border: 1px solid var(--border); border-left: 4px solid ${borderColor}; border-radius: 6px; padding: 14px 16px; background: var(--card-bg);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+            <span style="background: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing:0.04em;">
+              ${badgeText} #${ev.event_id}
+            </span>
+            <span style="font-size: 12px; color: var(--text-muted); font-family: monospace;">${startTime}</span>
+          </div>
+          <div style="display:flex; gap: 16px; flex-wrap:wrap; font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+            <div>Kare Aralığı: <strong style="color:var(--text); font-family:monospace;">${ev.start_frame} &ndash; ${ev.end_frame}</strong></div>
+            <div>Süre: <strong style="color:var(--text);">${ev.duration_frames} kare (~${durationSec} sn)</strong></div>
+            <div>Tepe Skoru: <strong style="color:var(--accent-red); font-family:monospace;">${ev.peak_score.toFixed(4)}</strong></div>
+            <div>Hedef Türü: <strong style="color:var(--text); text-transform:capitalize;">${ev.anomaly_type || 'intruder'}</strong></div>
+          </div>
+          <div style="font-size: 13px; color: var(--text); background: var(--card-subtle); padding: 10px 12px; border-radius: 4px; line-height: 1.5; border: 1px solid var(--border);">
+            <strong>Taktiksel Değerlendirme (LLM):</strong> ${ev.llm_summary || '(Taktiksel özet oluşturuluyor...)'}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
   function updateStatus(s) {
     document.getElementById('m-frames').textContent = s.frame_count;
     document.getElementById('m-anomalies').textContent = s.anomaly_count;
     document.getElementById('m-events').textContent = s.event_count;
     document.getElementById('m-fps').textContent = s.fps.toFixed(1);
     document.getElementById('fps-badge').textContent = s.fps.toFixed(1) + ' FPS';
+
+    const repTotal = document.getElementById('rep-total-frames');
+    if (repTotal) repTotal.textContent = s.frame_count;
+    const repAnom = document.getElementById('rep-anom-frames');
+    if (repAnom) repAnom.textContent = s.anomaly_count;
+    const repEvents = document.getElementById('rep-event-count');
+    if (repEvents) repEvents.textContent = s.event_count;
+    const repFps = document.getElementById('rep-fps');
+    if (repFps) repFps.textContent = s.fps.toFixed(1);
 
     currentThreshold = s.threshold || 0.20;
     const score = s.latest_score;
@@ -1249,6 +1516,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   function updateEvents(events) {
     document.getElementById('event-count-badge').textContent = events.length + ' events';
     document.getElementById('m-events').textContent = events.length;
+    renderInlineReport(events);
     if (events.length === knownEvents) return;
 
     const feed = document.getElementById('alert-feed');

@@ -204,7 +204,15 @@ class DashboardVisualizer:
                         cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
                         cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
 
-                        cv2.putText(right_resized, "INTRUDER [ALERT]", (rx1, max(35, ry1 - 5)),
+                        target_label = getattr(result, "target_label", None)
+                        if not target_label:
+                            aspect = (rx2 - rx1) / max(1, (ry2 - ry1))
+                            if aspect > 1.35:
+                                target_label = "VEHICLE [ALERT]"
+                            else:
+                                target_label = "INTRUDER [ALERT]"
+
+                        cv2.putText(right_resized, target_label, (rx1, max(35, ry1 - 5)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.32, (50, 220, 255), 1, cv2.LINE_AA)
         else:
             cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (10, 20),

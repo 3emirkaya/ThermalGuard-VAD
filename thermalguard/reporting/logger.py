@@ -187,6 +187,9 @@ class EventLogger:
         ce = self._current_event
         scores = ce.get("scores", [])
         end_time = datetime.now(timezone.utc).isoformat()
+        ev_type = ce.get("anomaly_type") or anomaly_type
+        if ev_type == "normal" and anomaly_type != "normal":
+            ev_type = anomaly_type
 
         event = AnomalyEvent(
             event_id=self._event_id,
@@ -195,7 +198,7 @@ class EventLogger:
             start_time=ce["start_time"],
             end_time=end_time,
             duration_frames=frame_idx - ce["start_frame"] + 1,
-            anomaly_type=anomaly_type,
+            anomaly_type=ev_type,
             peak_score=float(max(scores)) if scores else 0.0,
             mean_score=float(sum(scores) / len(scores)) if scores else 0.0,
             scores=scores,
