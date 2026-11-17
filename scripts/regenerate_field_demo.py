@@ -174,12 +174,32 @@ def main():
     cv2.imwrite("preview_field_intruder.png", rendered_frames[130])
     cv2.imwrite("preview_field_exit.png", rendered_frames[225])
 
-    # 5. Web-Optimized GIF Generation (Subsample stride 2, 96 adaptive colors, optimize=True)
+    # 5. Web-Optimized GIF Generation (Stride 2, Master 256-Color Palette with Vibrant UI Swatches)
     print("[5/5] Compiling and optimizing demo_field_thermal.gif for web performance...")
-    # 240 frames -> 120 frames at 12 FPS gives identical 10-second real-world duration
     stride_frames = [rendered_frames[idx] for idx in range(0, total_frames, 2)]
     pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in stride_frames]
-    quantized = [f.quantize(colors=96, method=Image.Quantize.MEDIANCUT) for f in pil_frames]
+
+    # Build master palette to guarantee vibrant green, red, and yellow across ALL frames without flickering
+    sample_indices = [0, 20, 50, 80, 110, 140, 170, 200, 230]
+    sample_thumbs = [pil_frames[min(i // 2, len(pil_frames) - 1)].resize((160, 135)) for i in sample_indices]
+    row1 = np.hstack([np.array(t) for t in sample_thumbs[:3]])
+    row2 = np.hstack([np.array(t) for t in sample_thumbs[3:6]])
+    row3 = np.hstack([np.array(t) for t in sample_thumbs[6:9]])
+    collage = np.vstack([row1, row2, row3])
+
+    # Add explicit UI color swatches
+    swatch = np.zeros((40, collage.shape[1], 3), dtype=np.uint8)
+    sw_w = collage.shape[1] // 5
+    swatch[:, 0*sw_w:1*sw_w] = [40, 245, 60]    # Neon green (STATUS: PERIMETER SECURE & graph line)
+    swatch[:, 1*sw_w:2*sw_w] = [255, 45, 45]    # High-alert red (ALARM: ANOMALY DETECTED)
+    swatch[:, 2*sw_w:3*sw_w] = [255, 220, 40]   # Tactical yellow (INTRUDER [ALERT] & banner)
+    swatch[:, 3*sw_w:4*sw_w] = [180, 190, 200]  # Slate telemetry text
+    swatch[:, 4*sw_w:]       = [25, 30, 36]     # Dark UI background
+
+    palette_src = Image.fromarray(np.vstack([collage, swatch]))
+    master_palette = palette_src.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+
+    quantized = [f.quantize(palette=master_palette, dither=Image.Dither.NONE) for f in pil_frames]
 
     out_gif = "demo_field_thermal.gif"
     quantized[0].save(

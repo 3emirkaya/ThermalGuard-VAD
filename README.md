@@ -10,13 +10,13 @@
 
 ---
 
-![ThermalGuard-VAD Tactical HUD Banner](demo.gif)
-> **Figure 1 / Şekil 1:** `ThermalGuard-VAD` Real-Time Tactical Dashboard (Synthetic Perimeter Simulation). **Top Panel:** Live scrolling Anomaly Score timeline with dynamic threshold line and alert state badge. **Bottom Left:** Preprocessed Long-Wave Infrared (LWIR) feed with CLAHE and bilateral filtering. **Bottom Right:** Spatial Reconstruction Error Heatmap highlighting an unauthorized intruder breaching the perimeter fence.
+![ThermalGuard-VAD Tactical HUD Banner](demo_kaist_pedestrian.gif)
+> **Figure 1:** `ThermalGuard-VAD` Real-Time Tactical Dashboard (KAIST Benchmark Pedestrian Sector Crossing — Real LWIR Sensor Feed). **Top Panel:** Live scrolling Anomaly Score timeline with dynamic threshold line and alert state badge. **Bottom Left:** Preprocessed Long-Wave Infrared (LWIR) raw thermal feed. **Bottom Right:** Thermal fusion with spatial reconstruction error heatmap highlighting an unauthorized pedestrian breaching the security perimeter sector.
 
 ---
 
 ![ThermalGuard-VAD Operational Field Thermal Benchmark](demo_field_thermal.gif)
-> **Figure 2 / Şekil 2:** `ThermalGuard-VAD` Live Operational Field Thermal Benchmark (Real 640×512 LWIR Sensor Feed). Real-time spatio-temporal anomaly localization, dynamic score elevation, and tactical intruder bounding-box tracking on an authentic thermal defense surveillance sequence.
+> **Figure 2:** `ThermalGuard-VAD` Live Operational Field Thermal Benchmark (Real 640×512 LWIR Sensor Feed). Real-time spatio-temporal anomaly localization, dynamic score elevation, and tactical intruder bounding-box tracking on an authentic thermal defense surveillance sequence.
 
 ---
 
@@ -29,8 +29,9 @@
   - [5. Spatio-Temporal Autoencoder (STAE) Architecture](#5-spatio-temporal-autoencoder-stae-architecture)
   - [6. Anomaly Scoring & Spatial Localization Heatmap](#6-anomaly-scoring--spatial-localization-heatmap)
   - [7. Empirical Benchmark & Ablation Study](#7-empirical-benchmark--ablation-study)
-  - [8. Edge Deployment & Real-Time Telemetry](#8-edge-deployment--real-time-telemetry)
-  - [9. Repository Architecture](#9-repository-architecture)
+  - [8. Tactical Web Command Center (C2 Dashboard)](#8-tactical-web-command-center-c2-dashboard)
+  - [9. Edge Deployment & Real-Time Telemetry](#9-edge-deployment--real-time-telemetry)
+  - [10. Repository Architecture](#10-repository-architecture)
 - [Türkçe Versiyon](#-türkçe-versiyon)
   - [1. Savunma Sanayii Problem Tanımı ve Termal Fizik Motivasyonu](#1-savunma-sanayii-problem-tanımı-ve-termal-fizik-motivasyonu)
   - [2. Standart RGB Modelleri Kızılötesinde Neden Çöker?](#2-standart-rgb-modelleri-kızılötesinde-neden-çöker)
@@ -39,7 +40,8 @@
   - [5. Model Mimarisi: Spatio-Temporal Autoencoder (STAE)](#5-model-mimarisi-spatio-temporal-autoencoder-stae)
   - [6. Anomali Skorlama ve Isı Haritası (Heatmap) Mekaniği](#6-anomali-skorlama-ve-ısı-haritası-heatmap-mekaniği)
   - [7. Deneysel Kıyaslama ve Saha Dayanıklılık Ablasyonu](#7-deneysel-kıyaslama-ve-saha-dayanıklılık-ablasyonu)
-  - [8. Kenar Cihaz Performansı ve Sayısal Doğrulama](#8-kenar-cihaz-performansı-ve-sayısal-doğrulama)
+  - [8. Taktik Komuta ve Denetim Web Paneli (C2 Arayüzü)](#8-taktik-komuta-ve-denetim-web-paneli-c2-arayüzü)
+  - [9. Kenar Cihaz Performansı ve Sayısal Doğrulama](#9-kenar-cihaz-performansı-ve-sayısal-doğrulama)
 
 ---
 
@@ -170,7 +172,7 @@ In border surveillance, an intruder occupies only 1% to 3% of the image frame. I
 $$\mathcal{S}_{\text{frame}} = \text{Percentile}_{99.5}\left( (x - \hat{x})^2 \right)$$
 Combined with a causal Exponential Moving Average (EMA, $\alpha=0.6$) across consecutive frames, this eliminates transient single-frame sensor noise while maintaining immediate sensitivity to perimeter breaches.
 
-### Dual-Panel Tactical HUD Visualization (`demo.gif`)
+### Dual-Panel Tactical HUD Visualization (`demo_kaist_pedestrian.gif`)
 * **Upper Panel:** Live scrolling graph rendering anomaly score vs. frame index. Displays a horizontal red dashed threshold line (`Threshold = 0.20`), green/red status badges, and hardware latency telemetrics.
 * **Lower Panel:** Split display showing preprocessed LWIR input alongside the spatial error heatmap (blended via OpenCV `COLORMAP_INFERNO`), painting anomalous perimeter breaches in radiant amber/yellow with tactical tracking box.
 
@@ -195,7 +197,19 @@ Evaluated under controlled baseline and severe field degradation conditions (sim
 
 ---
 
-## 8. Edge Deployment & Real-Time Telemetry
+## 8. Tactical Web Command Center (C2 Dashboard)
+
+`ThermalGuard-VAD` includes a production-grade tactical web console (`app.py`) for live perimeter operations, operator telemetry, and automated security audit reporting.
+
+![ThermalGuard-VAD Live Monitoring Dashboard](docs/dashboard_live.png)
+> **Figure 3:** Live Perimeter Monitoring & Tactical Control Deck. **Top Control Bar:** Multi-source selector (KAIST benchmark, operational field thermal cameras, RTSP IP streams, or file uploads), pause/resume controls, and telemetry gauges. **Left Stream:** Dual-window display showing calibrated raw LWIR thermal input alongside real-time anomaly heatmaps with bounding-box intruder tracking (`CYCLIST [ALERT]`). **Right Deck:** Real-time processing metrics (21.4 FPS CPU throughput, 45.4 ms latency) and timestamped event notifications with LLM situational assessments.
+
+![ThermalGuard-VAD Incident & Audit Report](docs/incident_report.png)
+> **Figure 4:** Integrated Security Audit & Incident Forensics Deck (Located at the bottom of the dashboard). Operators receive automated perimeter breach audits with exact frame ranges, intrusion durations, peak anomaly scores, classification tags (`Vehicle` / `Human`), and high-level LLM defense summaries exportable to PDF.
+
+---
+
+## 9. Edge Deployment & Real-Time Telemetry
 
 The architecture is fully verified for embedded deployment on edge platforms (NVIDIA Jetson AGX Orin, Xavier NX, and x86 edge servers):
 
@@ -206,7 +220,7 @@ The architecture is fully verified for embedded deployment on edge platforms (NV
 
 ---
 
-## 9. Repository Architecture
+## 10. Repository Architecture
 
 ```
 ThermalGuard-VAD/
@@ -214,6 +228,9 @@ ThermalGuard-VAD/
 │   ├── default.yaml            # High-fidelity surveillance configuration
 │   └── edge_jetson.yaml        # Lightweight profile optimized for NVIDIA Jetson (<15ms)
 ├── data/                       # Dataset caching & KAIST benchmark sequences
+├── docs/                       # High-resolution dashboard & incident audit screenshots
+│   ├── dashboard_live.png      # Tactical live perimeter command center
+│   └── incident_report.png     # Automated security incident forensics & audit log
 ├── scripts/
 │   ├── benchmark.py            # Systematic defense ablation & noise robustness evaluator
 │   ├── download_kaist.py       # Stdlib-only KAIST LWIR thermal channel downloader
@@ -230,7 +247,8 @@ ThermalGuard-VAD/
 │   ├── models/                 # Spatio-Temporal Autoencoder & Fused ConvLSTM
 │   ├── preprocessing/          # 5-stage thermal pipeline (AGC, FPN, Bilateral, CLAHE)
 │   └── visualization/          # Real-time dashboard renderer & GIF/MP4 export
-├── demo.gif                    # Tactical evaluation video output (HUD + Heatmap)
+├── demo_kaist_pedestrian.gif   # Tactical evaluation video output (KAIST Pedestrian Crossing)
+├── demo_field_thermal.gif      # Operational field corridor benchmark video output
 ├── requirements.txt            # Python dependencies
 └── pyproject.toml              # Build system, metadata & pytest pythonpath
 ```
@@ -320,7 +338,7 @@ Ham Termal Kare (8/16-bit)
 ## 6. Anomali Skorlama ve Isı Haritası (Heatmap) Mekaniği
 
 * **Top-K / 99.5 Persentil Havuzlama:** Sızan bir insan karenin yalnızca %1-%3'ünü kaplar. Basit ortalama MSE alınırsa normal arka plan anomaliyi boğar. Bu yüzden piksellerin en yüksek hatalı %0.5'lik kısmının persentili alınır.
-* **Taktik HUD Paneli (`demo.gif`):**
+* **Taktik HUD Paneli (`demo_kaist_pedestrian.gif`):**
   * Üst panelde gerçek zamanlı akan Anomali Skoru grafiği ve kırmızı alarm eşik çizgisi (`Threshold = 0.20`).
   * Alt panelde termal akış üzerinde anomali bölgesini vurgulayan Inferno sahte renk paleti ve hedef takip kutusu.
 
@@ -333,7 +351,19 @@ Ham Termal Kare (8/16-bit)
 
 ---
 
-## 8. Kenar Cihaz Performansı ve Sayısal Doğrulama
+## 8. Taktik Komuta ve Denetim Web Paneli (C2 Arayüzü)
+
+`ThermalGuard-VAD`, saha operatörlerinin anlık çevre güvenliğini takip edebilmesi, eşik değerlerini ayarlayabilmesi ve adli güvenlik raporları üretebilmesi için tam teşekküllü bir taktik web arayüzüne (`app.py`) sahiptir.
+
+![ThermalGuard-VAD Canlı İzleme Konsolu](docs/dashboard_live.png)
+> **Şekil 3:** Canlı Çevre Gözetleme ve Taktik Kontrol Paneli. **Üst Kontrol Barı:** Çoklu kaynak seçici (KAIST veri seti sekansları, operasyonel saha termal kameraları, RTSP IP canlı akışları veya özel video yükleme), durdur/devam et kontrolleri ve durum göstergeleri. **Sol Akış:** Ham LWIR beyaz-sıcak termal görüntü ile gerçek zamanlı anomali rekonstrüksiyon ısı haritasının (`CYCLIST [ALERT]`) yan yana izlenmesi. **Sağ Panel:** Anlık sistem metrikleri (21.4 FPS CPU hızı, 45.4 ms gecikme) ve zaman damgalı LLM durum değerlendirmeleri.
+
+![ThermalGuard-VAD Olay ve Teftiş Raporu](docs/incident_report.png)
+> **Şekil 4:** Entegre Güvenlik Olayı Teftiş ve Adli Bilişim Raporu (Ana sayfanın alt kısmında yer alır). İhlal gerçekleştiğinde kare aralıkları, ihlal süresi, tepe anomali skoru, hedef tipi (`Araç` / `İnsan`) ve LLM tarafından üretilen askeri durum özeti otomatik olarak listelenir ve PDF olarak dışa aktarılabilir.
+
+---
+
+## 9. Kenar Cihaz Performansı ve Sayısal Doğrulama
 
 * **Parametre Sayısı:** 588.000 float32 (~4.60 MB).
 * **Hız:** Standart x86 CPU üzerinde **44.6 FPS**, gömülü platformlarda (Jetson Orin/Xavier) **160+ FPS**.
