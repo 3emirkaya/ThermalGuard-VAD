@@ -7,22 +7,19 @@ unit testing, and perimeter security evaluation without requiring external datas
 
 Simulated Thermal Dynamics:
 ---------------------------
-  1. Thermal Backgrounds: Cold night sky radiance falloff, terrain thermal inertia,
-     mountain horizons, asphalt patrol roads with perspective, and security wire fencing.
+  1. Thermal Backgrounds: Cold night sky (low radiance), ground temperature gradients,
+     watchtowers, concrete anti-ram barriers, asphalt roads, and metal perimeter fencing.
   2. Multi-Environment Presets:
-     - 'outpost': Military Forward Operating Base (FOB) with distant mountain horizon,
-       asphalt patrol road with perspective, concrete road barriers, and textured terrain.
-     - 'facility': High-security perimeter dead zone with textured gravel apron,
-       distant security berm, and concertina-topped chainlink fence.
+     - 'outpost': Military Forward Operating Base (FOB) with guard tower, patrol road,
+       mountain ridge thermal haze, and concertina wire fence.
+     - 'facility': High-security critical facility with concrete blast wall and security light posts.
      - 'perimeter': Classic open border perimeter fence line and rolling terrain.
   3. Physical Sensor Artifacts: Microbolometer NETD temporal noise (~50 mK equivalent),
      column-wise Fixed Pattern Noise (FPN), dead pixels, and optical lens vignetting.
   4. Tactical Anomaly Scenarios (Perimeter Breaches):
      - 'intruder': Warm human target (37°C core body heat, head/torso gradients, bipedal gait).
-     - 'vehicle': Tactical patrol vehicle with sky-reflecting metallic chassis, white-hot
-       friction-heated tires, hot radiator grille, and undercarriage exhaust.
-     - 'crawler': Low-profile crawling saboteur with anatomical multi-joint low-crawl kinematics
-       (scanning head, core torso, reaching forearms, and alternating knee drive).
+     - 'vehicle': High-speed tactical vehicle with hot engine block/grille, exhaust plume, and wheels.
+     - 'crawler': Low-profile crawling saboteur prone along fence base.
      - 'heat_source': Static anomalous hot spot or abandoned suspicious payload.
 """
 from __future__ import annotations
@@ -78,63 +75,69 @@ class ThermalPerimeterSimulator:
         bg = np.zeros((h, w), dtype=np.float32)
 
         if self.environment == "outpost":
-            # --- Environment 1: Military Forward Operating Base (FOB) Patrol Road ---
-            horizon = int(h * 0.44)
-            # Cold night sky radiance falloff (26.0 - 46.0)
+            # --- Environment 1: Military Forward Operating Base (FOB) ---
+            horizon = int(h * 0.42)
+            # Sky radiance gradient (cold night sky: 32 - 52)
             for y in range(horizon):
-                bg[y, :] = 26.0 + (y / max(1, horizon)) * 20.0
+                bg[y, :] = 32.0 + (y / max(1, horizon)) * 20.0
 
-            # Distant mountain ridge with realistic fractal silhouette
-            x_axis = np.linspace(0, 4.5 * np.pi, w)
-            mountains = np.sin(x_axis) * 5.5 + np.cos(2.3 * x_axis) * 3.2 + np.sin(5.1 * x_axis) * 1.6
+            # Distant mountain ridge (thermal haze)
+            x = np.linspace(0, 3.5 * np.pi, w)
+            ridge = np.sin(x) * 5.5 + np.cos(2.2 * x) * 2.5
             for col in range(w):
-                y_top = int(horizon + mountains[col])
-                bg[max(0, horizon - 11):min(h, y_top + 1), col] = 36.0 + (col % 6) * 1.5
+                sy = int(horizon - 9 + ridge[col])
+                bg[max(0, sy):horizon, col] = 46.0
 
-            # Open desert/rocky perimeter ground
+            # Ground gradient (warm earth / soil: 62 - 96)
             for y in range(horizon, h):
-                depth = (y - horizon) / max(1, h - horizon)
-                bg[y, :] = 54.0 + depth * 34.0
+                factor = (y - horizon) / max(1, h - horizon)
+                bg[y, :] = 62.0 + factor * 34.0
 
-            # Asphalt patrol road stretching across lower sector
-            road_top = int(h * 0.64)
-            road_bot = int(h * 0.88)
-            for y in range(road_top, road_bot):
-                frac = (y - road_top) / max(1, road_bot - road_top)
-                bg[y, :] = 70.0 + frac * 12.0  # Warmer asphalt retaining daytime thermal inertia
+            # Asphalt patrol road with perspective from right to center
+            for y in range(horizon, h):
+                factor = (y - horizon) / max(1, h - horizon)
+                road_w = int(10 + factor * 34)
+                road_c = int(w * 0.58 + factor * 12)
+                bg[y, max(0, road_c - road_w):min(w, road_c + road_w)] += 13.0
 
-            # Soft road shoulders
-            bg[road_top:road_top + 2, :] = 58.0
-            bg[road_bot - 2:road_bot, :] = 56.0
-
-            # Concrete barrier posts along road edge
-            guard_y = road_top - 4
-            for px in range(12, w, 22):
-                bg[guard_y - 8:guard_y + 4, px:px + 2] = 94.0
+            # Elevated guard watchtower on left flank
+            tw_x1, tw_x2 = max(2, int(w * 0.08)), int(w * 0.22)
+            tw_base_y = int(h * 0.58)
+            tw_top_y = int(h * 0.22)
+            # Concrete bunker base
+            bg[tw_base_y:int(h * 0.65), tw_x1:tw_x2] = 52.0
+            # Sentry cabin (warmer interior)
+            bg[tw_top_y:int(h * 0.36), tw_x1:tw_x2] = 78.0
+            bg[int(h * 0.27):int(h * 0.33), tw_x1 + 3:tw_x2 - 3] = 105.0  # Warm observation window
+            # Stilt support posts
+            bg[int(h * 0.36):tw_base_y, tw_x1 + 1:tw_x1 + 3] = 42.0
+            bg[int(h * 0.36):tw_base_y, tw_x2 - 3:tw_x2 - 1] = 42.0
 
         elif self.environment == "facility":
-            # --- Environment 2: High-Security Perimeter Dead Zone ---
-            horizon = int(h * 0.46)
-            # Nocturnal sky gradient
+            # --- Environment 2: Critical High-Security Facility ---
+            horizon = int(h * 0.40)
             for y in range(horizon):
-                bg[y, :] = 28.0 + (y / max(1, horizon)) * 20.0
+                bg[y, :] = 34.0 + (y / max(1, horizon)) * 18.0
 
-            # Distant perimeter berm / tree line silhouette
-            x_axis = np.linspace(0, 6.0 * np.pi, w)
-            berm = np.sin(x_axis) * 3.5 + np.cos(3.2 * x_axis) * 2.0
-            for col in range(w):
-                y_top = int(horizon + berm[col])
-                bg[max(0, horizon - 8):min(h, y_top + 1), col] = 34.0 + (col % 5) * 1.5
+            # Distant industrial facility silhouettes
+            bg[int(h * 0.26):horizon, int(w * 0.55):int(w * 0.82)] = 58.0
+            bg[int(h * 0.22):horizon, int(w * 0.62):int(w * 0.74)] = 64.0
 
-            # Gravel apron / perimeter dead zone
+            # Concrete tarmac apron (70 - 100)
             for y in range(horizon, h):
-                depth = (y - horizon) / max(1, h - horizon)
-                bg[y, :] = 58.0 + depth * 36.0
+                factor = (y - horizon) / max(1, h - horizon)
+                bg[y, :] = 68.0 + factor * 30.0
 
-            # Low gravel patrol path
-            path_y = int(h * 0.68)
-            for y in range(path_y, h):
-                bg[y, :] += 6.0
+            # Security concrete blast wall
+            wall_y = int(h * 0.54)
+            bg[wall_y:wall_y + 16, :] = 58.0
+            for px in range(0, w, 22):
+                bg[wall_y:wall_y + 16, px:px + 2] = 48.0  # Expansion joints
+
+            # Security floodlight stanchions
+            for lx in [int(w * 0.25), int(w * 0.75)]:
+                bg[int(h * 0.30):wall_y, lx:lx + 2] = 45.0
+                bg[int(h * 0.28):int(h * 0.31), lx - 3:lx + 5] = 118.0  # Thermal housing
 
         else:
             # --- Environment 3: Classic Border Perimeter ---
@@ -154,7 +157,7 @@ class ThermalPerimeterSimulator:
 
         # Micro-texture terrain noise (gravel, dry soil, emissivity variations)
         noise = self.rng.normal(0, 3.2, (h, w)).astype(np.float32)
-        noise = cv2.GaussianBlur(noise, (5, 5), 1.0)
+        noise = cv2.GaussianBlur(noise, (5, 5), 1.2)
         bg += noise
 
         # Optical lens vignetting (slight radial falloff typical of wide-angle thermal optics)
@@ -169,18 +172,13 @@ class ThermalPerimeterSimulator:
         h, w = self.height, self.width
         fence = np.zeros((h, w), dtype=np.float32)
 
-        if self.environment == "outpost":
-            # Outpost wire is alongside road shoulder
-            fence_y = int(h * 0.60)
-            for dy in [0, 6, 12, 18]:
-                y_pos = fence_y + dy
-                if y_pos < h:
-                    fence[y_pos, :] = 0.55
-            for x_pos in range(8, w, 24):
-                fence[fence_y:min(h, fence_y + 22), x_pos:x_pos + 2] = 0.85
+        if self.environment == "facility":
+            fence_y = int(h * 0.52)
+            # Barbed wire coils on top of concrete wall
+            fence[fence_y:fence_y + 3, :] = 0.7
             return fence
 
-        fence_y = int(h * 0.54) if self.environment == "facility" else int(h * 0.60)
+        fence_y = int(h * 0.60)
         # Horizontal steel tension lines
         for dy in [0, 5, 10, 15, 20]:
             y_pos = fence_y + dy
@@ -188,17 +186,18 @@ class ThermalPerimeterSimulator:
                 fence[y_pos, :] = 0.65
 
         # Vertical structural fence posts
-        step = 22 if self.environment == "facility" else 25
+        step = 22 if self.environment == "outpost" else 25
         for x_pos in range(8, w, step):
-            fence[fence_y:min(h, fence_y + 24), x_pos:x_pos + 2] = 0.90
+            fence[fence_y:min(h, fence_y + 24), x_pos:x_pos + 2] = 0.9
 
-        # Diagonal cross-braces
-        for x_pos in range(8, w - step, step):
-            for dy in range(20):
-                px = x_pos + int(dy * (step / 20.0))
-                py = fence_y + dy
-                if py < h and px < w:
-                    fence[py, px] = 0.35
+        # Diagonal cross-braces for outpost fence
+        if self.environment == "outpost":
+            for x_pos in range(8, w - step, step):
+                for dy in range(20):
+                    px = x_pos + int(dy * (step / 20.0))
+                    py = fence_y + dy
+                    if py < h and px < w:
+                        fence[py, px] = 0.35
 
         return fence
 
@@ -265,128 +264,57 @@ class ThermalPerimeterSimulator:
                     y1 = int(np.clip(cy + bh / 2.0, 0, h))
 
                     if x1 > x0 and y1 > y0:
-                        y_grid, x_grid = np.ogrid[:h, :w]
-                        is_fwd = anom.end_pos[0] >= anom.start_pos[0]
+                        py, px = np.ogrid[: y1 - y0, : x1 - x0]
+                        center_y, center_x = (y1 - y0) / 2.0, (x1 - x0) / 2.0
+                        patch_h, patch_w = y1 - y0, x1 - x0
 
                         if anom.anomaly_type == "vehicle":
-                            # --- Tactical Patrol Vehicle (Authentic Thermal Infrared Physics) ---
-                            # Vehicle dimensions: ~36x14 pixels (2.5:1 ratio)
-                            veh_cx = cx
-                            veh_cy = cy + math.sin(t * 1.5) * 0.4  # Road vibration
+                            # --- Tactical High-Speed Vehicle ---
+                            rad = ((px - center_x) / (bw / 2.0 + 1e-5)) ** 4 + ((py - center_y) / (bh / 2.0 + 1e-5)) ** 2
+                            heat_blob = np.exp(-1.1 * rad) * (anom.intensity * 0.78)
 
-                            # 1. Friction-Heated Wheels (intense thermal emission: 245-255)
-                            fw_x = veh_cx + int(bw * 0.28) if is_fwd else veh_cx - int(bw * 0.28)
-                            rw_x = veh_cx - int(bw * 0.28) if is_fwd else veh_cx + int(bw * 0.28)
-                            wheel_y = veh_cy + int(bh * 0.28)
+                            # Armored cabin roof
+                            cab_mask = (py < patch_h * 0.52) & (px > patch_w * 0.24) & (px < patch_w * 0.76)
+                            heat_blob[cab_mask] = np.maximum(heat_blob[cab_mask], anom.intensity * 0.84)
 
-                            fw_dist = ((x_grid - fw_x) / 3.4) ** 2 + ((y_grid - wheel_y) / 3.0) ** 2
-                            rw_dist = ((x_grid - rw_x) / 3.4) ** 2 + ((y_grid - wheel_y) / 3.0) ** 2
-                            wheels_heat = np.maximum(
-                                np.exp(-1.4 * fw_dist) * (anom.intensity * 0.98),
-                                np.exp(-1.4 * rw_dist) * (anom.intensity * 0.98),
-                            )
+                            # White-hot front radiator & engine bay
+                            is_fwd = anom.end_pos[0] >= anom.start_pos[0]
+                            eng_x = patch_w * (0.84 if is_fwd else 0.16)
+                            eng_rad = ((px - eng_x) / (bw * 0.22 + 1e-5)) ** 2 + ((py - patch_h * 0.55) / (bh * 0.35 + 1e-5)) ** 2
+                            heat_blob = np.maximum(heat_blob, np.exp(-1.8 * eng_rad) * anom.intensity)
 
-                            # 2. Engine Compartment / Front Radiator Grille (white-hot: 252)
-                            grille_x = veh_cx + int(bw * 0.44) if is_fwd else veh_cx - int(bw * 0.44)
-                            grille_y = veh_cy + int(bh * 0.05)
-                            grille_dist = ((x_grid - grille_x) / 2.8) ** 2 + ((y_grid - grille_y) / 3.2) ** 2
-                            grille_heat = np.exp(-1.5 * grille_dist) * anom.intensity
+                            # Trailing exhaust heat plume
+                            ex_x = patch_w * (0.08 if is_fwd else 0.92)
+                            ex_rad = ((px - ex_x) / (bw * 0.18 + 1e-5)) ** 2 + ((py - patch_h * 0.68) / (bh * 0.28 + 1e-5)) ** 2
+                            heat_blob = np.maximum(heat_blob, np.exp(-1.3 * ex_rad) * (anom.intensity * 0.92))
 
-                            # 3. Exhaust Pipe & Muffler under rear chassis (240)
-                            ex_x = veh_cx - int(bw * 0.42) if is_fwd else veh_cx + int(bw * 0.42)
-                            ex_y = veh_cy + int(bh * 0.24)
-                            ex_dist = ((x_grid - ex_x) / 3.2) ** 2 + ((y_grid - ex_y) / 1.8) ** 2
-                            exhaust_heat = np.exp(-1.8 * ex_dist) * (anom.intensity * 0.94)
+                            # Hot wheels (front and rear at bottom contact)
+                            for w_rel in [0.22, 0.78]:
+                                wx = patch_w * w_rel
+                                w_rad = ((px - wx) / (bw * 0.15 + 1e-5)) ** 2 + ((py - patch_h * 0.82) / (bh * 0.24 + 1e-5)) ** 2
+                                heat_blob = np.maximum(heat_blob, np.exp(-2.2 * w_rad) * (anom.intensity * 0.96))
 
-                            # 4. Sky-reflecting metallic chassis body (cool dark gray in white-hot mode: 65-80)
-                            body_dist = ((x_grid - veh_cx) / (bw * 0.44)) ** 4 + ((y_grid - veh_cy) / (bh * 0.38)) ** 2
-                            chassis_body = np.where(body_dist <= 1.0, 72.0, 0.0)
-
-                            # Cabin roof cooler due to sky radiation reflection
-                            cab_dist = ((x_grid - (veh_cx - int(bw * 0.05))) / (bw * 0.26)) ** 2 + (
-                                (y_grid - (veh_cy - int(bh * 0.22))) / (bh * 0.28)
-                            ) ** 2
-                            chassis_body = np.where(cab_dist <= 1.0, 62.0, chassis_body)
-
-                            # Highlight on body seams and trim edges
-                            seam_dist = np.abs(body_dist - 0.95)
-                            edge_highlight = np.where(seam_dist < 0.20, 115.0, 0.0)
-
-                            # Composite vehicle onto frame
-                            chassis_mask = body_dist <= 1.0
-                            frame[chassis_mask] = chassis_body[chassis_mask] + edge_highlight[chassis_mask]
-
-                            hot_components = np.maximum.reduce([wheels_heat, grille_heat, exhaust_heat])
-                            frame = np.maximum(frame, hot_components)
-
-                            # Hot tire contact patches on road
-                            for wx in [fw_x, rw_x]:
-                                frame[int(wheel_y + 3):int(wheel_y + 5), int(wx - 3):int(wx + 4)] = np.maximum(
-                                    frame[int(wheel_y + 3):int(wheel_y + 5), int(wx - 3):int(wx + 4)], 220.0
-                                )
-
-                            frame_mask[chassis_mask] = 1
+                            frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
+                            frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.25, 1, 0)
 
                         elif anom.anomaly_type in ("crawler", "crawling_intruder"):
-                            # --- Prone Low-Profile Saboteur (Anatomical Low Crawl Kinematics) ---
-                            # Low-profile silhouette: ~26x10 pixels
-                            crawl_phase = t * 0.48
-                            crawl_cy = cy
+                            # --- Prone Low-Profile Saboteur ---
+                            # Creeping motion along ground
+                            crawl_cy = center_y + math.sin(t * 0.4) * 1.0
+                            rad = (np.abs((px - center_x) / (bw / 2.0 + 1e-5))) ** 2.5 + ((py - crawl_cy) / (bh / 2.0 + 1e-5)) ** 2
+                            heat_blob = np.exp(-1.3 * rad) * (anom.intensity * 0.88)
 
-                            # 1. Elevated Head: looking ahead, scanning (~235 white-hot)
-                            head_x = cx + int(bw * 0.38) if is_fwd else cx - int(bw * 0.38)
-                            head_y = crawl_cy - int(bh * 0.15) + int(math.sin(crawl_phase) * 0.8)
-                            head_dist = ((x_grid - head_x) / 2.6) ** 2 + ((y_grid - head_y) / 2.2) ** 2
-                            head_heat = np.exp(-1.5 * head_dist) * anom.intensity
+                            # Elevated warm head
+                            is_fwd = anom.end_pos[0] >= anom.start_pos[0]
+                            head_x = patch_w * (0.82 if is_fwd else 0.18)
+                            head_rad = ((px - head_x) / (bw * 0.16 + 1e-5)) ** 2 + ((py - patch_h * 0.35) / (bh * 0.35 + 1e-5)) ** 2
+                            heat_blob = np.maximum(heat_blob, np.exp(-1.8 * head_rad) * anom.intensity)
 
-                            # 2. Torso / Shoulders: core insulated warmth (~205)
-                            torso_x = cx + int(bw * 0.05) if is_fwd else cx - int(bw * 0.05)
-                            torso_y = crawl_cy
-                            torso_dist = ((x_grid - torso_x) / 6.5) ** 2 + ((y_grid - torso_y) / 3.4) ** 2
-                            torso_heat = np.exp(-1.2 * torso_dist) * (anom.intensity * 0.88)
-
-                            # 3. Arms / Elbows: alternating pulling strokes
-                            sign = 1 if is_fwd else -1
-                            elbow_left_x = cx + int(sign * (bw * 0.24 + math.sin(crawl_phase) * 3.5))
-                            elbow_left_y = crawl_cy + int(bh * 0.30)
-                            elbow_right_x = cx + int(sign * (bw * 0.24 - math.sin(crawl_phase) * 3.5))
-                            elbow_right_y = crawl_cy - int(bh * 0.25)
-
-                            el_dist = ((x_grid - elbow_left_x) / 3.0) ** 2 + ((y_grid - elbow_left_y) / 2.0) ** 2
-                            er_dist = ((x_grid - elbow_right_x) / 3.0) ** 2 + ((y_grid - elbow_right_y) / 2.0) ** 2
-                            elbows_heat = np.maximum(
-                                np.exp(-1.8 * el_dist) * (anom.intensity * 0.78),
-                                np.exp(-1.8 * er_dist) * (anom.intensity * 0.78),
-                            )
-
-                            # 4. Knees & Legs: alternating knee drive pulling along dirt
-                            knee_left_x = cx - int(sign * (bw * 0.26 + math.sin(crawl_phase) * 3.2))
-                            knee_left_y = crawl_cy + int(bh * 0.35)
-                            knee_right_x = cx - int(sign * (bw * 0.26 - math.sin(crawl_phase) * 3.2))
-                            knee_right_y = crawl_cy - int(bh * 0.20)
-
-                            feet_x = cx - int(sign * (bw * 0.46))
-                            feet_y = crawl_cy + int(math.sin(crawl_phase) * 1.5)
-
-                            kl_dist = ((x_grid - knee_left_x) / 3.5) ** 2 + ((y_grid - knee_left_y) / 2.2) ** 2
-                            kr_dist = ((x_grid - knee_right_x) / 3.5) ** 2 + ((y_grid - knee_right_y) / 2.2) ** 2
-                            feet_dist = ((x_grid - feet_x) / 4.0) ** 2 + ((y_grid - feet_y) / 1.8) ** 2
-                            legs_heat = np.maximum.reduce([
-                                np.exp(-1.8 * kl_dist) * (anom.intensity * 0.75),
-                                np.exp(-1.8 * kr_dist) * (anom.intensity * 0.75),
-                                np.exp(-2.0 * feet_dist) * (anom.intensity * 0.65),
-                            ])
-
-                            crawler_composite = np.maximum.reduce([head_heat, torso_heat, elbows_heat, legs_heat])
-                            frame = np.maximum(frame, crawler_composite)
-                            frame_mask[crawler_composite >= 50.0] = 1
+                            frame[y0:y1, x0:x1] = np.maximum(frame[y0:y1, x0:x1], heat_blob)
+                            frame_mask[y0:y1, x0:x1] = np.where(rad <= 1.1, 1, 0)
 
                         else:
                             # --- Realistic Walking Human Target ---
-                            py, px = np.ogrid[: y1 - y0, : x1 - x0]
-                            center_y, center_x = (y1 - y0) / 2.0, (x1 - x0) / 2.0
-                            patch_h, patch_w = y1 - y0, x1 - x0
-
                             # Head (hottest core ~ 37C)
                             gait_cycle = math.sin(t * 0.7)
                             head_y = patch_h * 0.18 + gait_cycle * 0.8

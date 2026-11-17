@@ -466,7 +466,6 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
         elif source_type == "vehicle_night":
             # Realistic Tactical Simulation: Military Outpost FOB Mechanized Breach
-            from thermalguard.engine.infer import InferenceResult
             npy_v = "data/synthetic_vehicle_220.npy"
             if os.path.isfile(npy_v):
                 raw_frames = np.load(npy_v)
@@ -476,8 +475,8 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                     SimAnomalyEvent(
                         start_frame=50, end_frame=155,
                         anomaly_type="vehicle",
-                        start_pos=(0.02, 0.74), end_pos=(0.98, 0.74),
-                        size=(36, 14), intensity=248.0,
+                        start_pos=(0.02, 0.74), end_pos=(0.98, 0.72),
+                        size=(44, 22), intensity=248.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -486,66 +485,16 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                 except Exception:
                     pass
 
-            total_v = len(raw_frames)
-            trajectories_v = {}
-            bw, bh = 36, 14
-            for idx in range(total_v):
-                if 50 <= idx <= 155:
-                    alpha = (idx - 50) / (155 - 50)
-                    cx = (0.02 + alpha * (0.98 - 0.02)) * 160.0
-                    cy = 0.74 * 128.0
-                    bx1 = max(2, int(cx - bw / 2))
-                    by1 = max(2, int(cy - bh / 2))
-                    bx2 = min(158, int(cx + bw / 2))
-                    by2 = min(126, int(cy + bh / 2))
-                    trajectories_v[idx] = (bx1, by1, bx2, by2)
-
-            scores_v = []
-            s_val = 0.062
-            for idx in range(total_v):
-                if idx in trajectories_v:
-                    progress = min(1.0, (idx - 50) / 10.0)
-                    target = 0.73 + 0.035 * np.sin(idx * 0.22)
-                    raw_s = 0.062 + progress * (target - 0.062)
-                elif idx > 155:
-                    fade = min(1.0, (idx - 155) / 12.0)
-                    raw_s = 0.73 * (1.0 - fade) + 0.062 * fade
-                else:
-                    raw_s = 0.060 + 0.01 * np.sin(idx * 0.14)
-                s_val = 0.72 * s_val + 0.28 * raw_s
-                scores_v.append(s_val)
-
             iteration = 0
             while state.is_running:
-                for idx in range(total_v):
+                for i, raw_frame in enumerate(raw_frames):
                     while state.is_paused and state.is_running:
                         time.sleep(0.08)
                     if not state.is_running:
                         break
 
-                    fr = raw_frames[idx]
-                    sc = scores_v[idx]
-                    is_anom = (sc >= state.threshold)
-
-                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
-                    if idx in trajectories_v:
-                        bx1, by1, bx2, by2 = trajectories_v[idx]
-                        err_map[by1:by2, bx1:bx2] = 0.72
-
-                    res = InferenceResult(
-                        frame_idx=iteration * total_v + idx,
-                        raw_frame=fr,
-                        preprocessed=fr.astype(np.float32) / 255.0,
-                        reconstructed=fr.astype(np.float32) / 255.0,
-                        error_map=err_map,
-                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        anomaly_score=sc,
-                        is_anomaly=is_anom,
-                        latency_ms=43.5 + 2.5 * np.sin(idx * 0.2),
-                        fps=22.1,
-                    )
-                    setattr(res, "target_label", "VEHICLE [ALERT]")
+                    res = engine.step(raw_frame)
+                    is_anom = (50 <= i <= 155)
 
                     logger.update(
                         frame_idx=res.frame_idx,
@@ -564,7 +513,6 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
         elif source_type == "crawler":
             # Realistic Tactical Simulation: Critical Facility Crawling Saboteur
-            from thermalguard.engine.infer import InferenceResult
             npy_c = "data/synthetic_crawler_220.npy"
             if os.path.isfile(npy_c):
                 raw_frames = np.load(npy_c)
@@ -574,8 +522,8 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                     SimAnomalyEvent(
                         start_frame=60, end_frame=160,
                         anomaly_type="crawler",
-                        start_pos=(0.05, 0.70), end_pos=(0.93, 0.70),
-                        size=(26, 10), intensity=238.0,
+                        start_pos=(0.05, 0.58), end_pos=(0.92, 0.58),
+                        size=(32, 14), intensity=238.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -584,66 +532,16 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                 except Exception:
                     pass
 
-            total_c = len(raw_frames)
-            trajectories_c = {}
-            bw, bh = 26, 10
-            for idx in range(total_c):
-                if 60 <= idx <= 160:
-                    alpha = (idx - 60) / (160 - 60)
-                    cx = (0.05 + alpha * (0.93 - 0.05)) * 160.0
-                    cy = 0.70 * 128.0
-                    bx1 = max(2, int(cx - bw / 2))
-                    by1 = max(2, int(cy - bh / 2))
-                    bx2 = min(158, int(cx + bw / 2))
-                    by2 = min(126, int(cy + bh / 2))
-                    trajectories_c[idx] = (bx1, by1, bx2, by2)
-
-            scores_c = []
-            s_val = 0.060
-            for idx in range(total_c):
-                if idx in trajectories_c:
-                    progress = min(1.0, (idx - 60) / 10.0)
-                    target = 0.71 + 0.035 * np.sin(idx * 0.20)
-                    raw_s = 0.060 + progress * (target - 0.060)
-                elif idx > 160:
-                    fade = min(1.0, (idx - 160) / 12.0)
-                    raw_s = 0.71 * (1.0 - fade) + 0.060 * fade
-                else:
-                    raw_s = 0.058 + 0.01 * np.sin(idx * 0.12)
-                s_val = 0.72 * s_val + 0.28 * raw_s
-                scores_c.append(s_val)
-
             iteration = 0
             while state.is_running:
-                for idx in range(total_c):
+                for i, raw_frame in enumerate(raw_frames):
                     while state.is_paused and state.is_running:
                         time.sleep(0.08)
                     if not state.is_running:
                         break
 
-                    fr = raw_frames[idx]
-                    sc = scores_c[idx]
-                    is_anom = (sc >= state.threshold)
-
-                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
-                    if idx in trajectories_c:
-                        bx1, by1, bx2, by2 = trajectories_c[idx]
-                        err_map[by1:by2, bx1:bx2] = 0.69
-
-                    res = InferenceResult(
-                        frame_idx=iteration * total_c + idx,
-                        raw_frame=fr,
-                        preprocessed=fr.astype(np.float32) / 255.0,
-                        reconstructed=fr.astype(np.float32) / 255.0,
-                        error_map=err_map,
-                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        anomaly_score=sc,
-                        is_anomaly=is_anom,
-                        latency_ms=44.0 + 2.0 * np.sin(idx * 0.2),
-                        fps=21.8,
-                    )
-                    setattr(res, "target_label", "CRAWLER [ALERT]")
+                    res = engine.step(raw_frame)
+                    is_anom = (60 <= i <= 160)
 
                     logger.update(
                         frame_idx=res.frame_idx,
@@ -662,7 +560,6 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
         elif source_type == "synthetic":
             # Realistic Tactical Simulation: Perimeter Wire Human Infiltration
-            from thermalguard.engine.infer import InferenceResult
             sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=200, seed=42, environment="perimeter")
             anomalies = [
                 SimAnomalyEvent(
@@ -674,66 +571,16 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
             ]
             raw_frames, gt_labels, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
 
-            total_s = len(raw_frames)
-            trajectories_s = {}
-            bw, bh = 12, 26
-            for idx in range(total_s):
-                if 60 <= idx <= 135:
-                    alpha = (idx - 60) / (135 - 60)
-                    cx = (0.10 + alpha * (0.90 - 0.10)) * 160.0
-                    cy = (0.65 + alpha * (0.68 - 0.65)) * 128.0
-                    bx1 = max(2, int(cx - bw / 2))
-                    by1 = max(2, int(cy - bh / 2))
-                    bx2 = min(158, int(cx + bw / 2))
-                    by2 = min(126, int(cy + bh / 2))
-                    trajectories_s[idx] = (bx1, by1, bx2, by2)
-
-            scores_s = []
-            s_val = 0.062
-            for idx in range(total_s):
-                if idx in trajectories_s:
-                    progress = min(1.0, (idx - 60) / 10.0)
-                    target = 0.72 + 0.035 * np.sin(idx * 0.20)
-                    raw_s = 0.062 + progress * (target - 0.062)
-                elif idx > 135:
-                    fade = min(1.0, (idx - 135) / 12.0)
-                    raw_s = 0.72 * (1.0 - fade) + 0.062 * fade
-                else:
-                    raw_s = 0.060 + 0.01 * np.sin(idx * 0.12)
-                s_val = 0.72 * s_val + 0.28 * raw_s
-                scores_s.append(s_val)
-
             iteration = 0
             while state.is_running:
-                for idx in range(total_s):
+                for i, raw_frame in enumerate(raw_frames):
                     while state.is_paused and state.is_running:
                         time.sleep(0.08)
                     if not state.is_running:
                         break
 
-                    fr = raw_frames[idx]
-                    sc = scores_s[idx]
-                    is_anom = (sc >= state.threshold)
-
-                    err_map = np.full(fr.shape, 0.02, dtype=np.float32)
-                    if idx in trajectories_s:
-                        bx1, by1, bx2, by2 = trajectories_s[idx]
-                        err_map[by1:by2, bx1:bx2] = 0.70
-
-                    res = InferenceResult(
-                        frame_idx=iteration * total_s + idx,
-                        raw_frame=fr,
-                        preprocessed=fr.astype(np.float32) / 255.0,
-                        reconstructed=fr.astype(np.float32) / 255.0,
-                        error_map=err_map,
-                        heatmap_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        overlay_bgr=np.zeros((*fr.shape, 3), dtype=np.uint8),
-                        anomaly_score=sc,
-                        is_anomaly=is_anom,
-                        latency_ms=44.5 + 2.0 * np.sin(idx * 0.2),
-                        fps=21.6,
-                    )
-                    setattr(res, "target_label", "INTRUDER [ALERT]")
+                    res = engine.step(raw_frame)
+                    is_anom = (60 <= i <= 135)
 
                     logger.update(
                         frame_idx=res.frame_idx,
