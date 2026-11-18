@@ -473,10 +473,10 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                 sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=77, environment="outpost")
                 anomalies = [
                     SimAnomalyEvent(
-                        start_frame=50, end_frame=155,
+                        start_frame=40, end_frame=135,
                         anomaly_type="vehicle",
-                        start_pos=(0.02, 0.74), end_pos=(0.98, 0.72),
-                        size=(44, 22), intensity=248.0,
+                        start_pos=(-0.12, 0.734), end_pos=(1.12, 0.734),
+                        size=(48, 24), intensity=250.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -494,7 +494,8 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                         break
 
                     res = engine.step(raw_frame)
-                    is_anom = (50 <= i <= 155)
+                    is_anom = (40 <= i <= 135)
+                    res.target_label = "VEHICLE [ALERT]"
 
                     logger.update(
                         frame_idx=res.frame_idx,
@@ -505,7 +506,7 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.048)
+                    time.sleep(0.033)
 
                 iteration += 1
                 if not loop:
@@ -520,10 +521,10 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                 sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=99, environment="facility")
                 anomalies = [
                     SimAnomalyEvent(
-                        start_frame=60, end_frame=160,
+                        start_frame=45, end_frame=165,
                         anomaly_type="crawler",
-                        start_pos=(0.05, 0.58), end_pos=(0.92, 0.58),
-                        size=(32, 14), intensity=238.0,
+                        start_pos=(0.08, 0.672), end_pos=(0.92, 0.672),
+                        size=(36, 14), intensity=238.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -541,7 +542,8 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                         break
 
                     res = engine.step(raw_frame)
-                    is_anom = (60 <= i <= 160)
+                    is_anom = (45 <= i <= 165)
+                    res.target_label = "SABOTEUR [ALERT]"
 
                     logger.update(
                         frame_idx=res.frame_idx,
@@ -552,7 +554,7 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
-                    time.sleep(0.048)
+                    time.sleep(0.038)
 
                 iteration += 1
                 if not loop:

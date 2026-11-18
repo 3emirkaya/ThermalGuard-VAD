@@ -175,9 +175,10 @@ class DashboardVisualizer:
             # Detect target blob and draw tactical bounding box on primary intruder
             if getattr(result, "error_map", None) is not None:
                 err = result.error_map
-                p_thresh = max(float(np.percentile(err, 99.0)), 0.08)
+                p_thresh = max(float(np.percentile(err, 98.2)), 0.08)
                 blob_mask = (err >= p_thresh).astype(np.uint8)
-                blob_mask = cv2.morphologyEx(blob_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+                # Morphological close bridges vehicle wheels, engine, and body into a single coherent entity
+                blob_mask = cv2.morphologyEx(blob_mask, cv2.MORPH_CLOSE, np.ones((7, 15), np.uint8))
                 contours, _ = cv2.findContours(blob_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                 scale_x = sub_w / max(1, err.shape[1])
@@ -185,8 +186,23 @@ class DashboardVisualizer:
 
                 valid_cnts = [c for c in contours if cv2.contourArea(c) >= 12]
                 if valid_cnts:
+                    # Pick largest contour or merge contiguous target blobs
                     main_cnt = max(valid_cnts, key=cv2.contourArea)
                     bx, by, bw, bh = cv2.boundingRect(main_cnt)
+
+                    # Merge any nearby contours (e.g. trailing exhaust plume or secondary wheel)
+                    for other_c in valid_cnts:
+                        if other_c is main_cnt:
+                            continue
+                        ox, oy, ow, oh = cv2.boundingRect(other_c)
+                        # Check horizontal and vertical proximity
+                        if abs(ox - (bx + bw // 2)) < 40 and abs(oy - by) < 18:
+                            nx1 = min(bx, ox)
+                            ny1 = min(by, oy)
+                            nx2 = max(bx + bw, ox + ow)
+                            ny2 = max(by + bh, oy + oh)
+                            bx, by, bw, bh = nx1, ny1, nx2 - nx1, ny2 - ny1
+
                     # Ignore artifacts in top banner area
                     if by * scale_y > 28:
                         rx1 = max(2, int((bx - 4) * scale_x))
@@ -208,8 +224,12 @@ class DashboardVisualizer:
                         target_label = getattr(result, "target_label", None)
                         if not target_label:
                             aspect = (rx2 - rx1) / max(1, (ry2 - ry1))
-                            if aspect > 1.35:
+                            box_w = rx2 - rx1
+                            box_h = ry2 - ry1
+                            if box_w >= 36 and box_h >= 16 and aspect > 1.35:
                                 target_label = "VEHICLE [ALERT]"
+                            elif aspect > 1.8 and box_h <= 18:
+                                target_label = "SABOTEUR [ALERT]"
                             else:
                                 target_label = "INTRUDER [ALERT]"
 
