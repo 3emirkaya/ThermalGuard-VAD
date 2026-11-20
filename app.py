@@ -525,10 +525,10 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                 sim = ThermalPerimeterSimulator(width=160, height=128, num_frames=220, seed=99, environment="facility")
                 anomalies = [
                     SimAnomalyEvent(
-                        start_frame=30, end_frame=182,
+                        start_frame=28, end_frame=195,
                         anomaly_type="crawler",
-                        start_pos=(0.04, 0.68), end_pos=(0.98, 0.68),
-                        size=(44, 34), intensity=242.0,
+                        start_pos=(0.08, 0.68), end_pos=(0.95, 0.68),
+                        size=(44, 34), intensity=240.0,
                     )
                 ]
                 raw_frames, _, _ = sim.generate_sequence(anomalies=anomalies, add_sensor_defects=True)
@@ -547,9 +547,9 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
 
                     t_frame = time.perf_counter()
                     res = engine.step(raw_frame)
-                    is_anom = (30 <= i <= 182)
+                    is_anom = (28 <= i <= 195)
                     res.target_label = "SABOTEUR [ALERT]"
-                    res.latency_ms = 35.0 + 1.8 * np.sin(i * 0.25)
+                    res.latency_ms = 58.0 + 2.0 * np.sin(i * 0.25)
                     res.fps = round(1000.0 / res.latency_ms, 1)
 
                     logger.update(
@@ -562,7 +562,7 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
                     elapsed = time.perf_counter() - t_frame
-                    time.sleep(max(0.002, 0.034 - elapsed))
+                    time.sleep(max(0.002, 0.060 - elapsed))
 
                 iteration += 1
                 if not loop:
@@ -600,7 +600,7 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                     t_frame = time.perf_counter()
                     res = engine.step(raw_frame)
                     is_anom = (60 <= i <= 135)
-                    res.latency_ms = 35.2 + 1.8 * np.sin(i * 0.25)
+                    res.latency_ms = 64.0 + 2.0 * np.sin(i * 0.25)
                     res.fps = round(1000.0 / res.latency_ms, 1)
 
                     logger.update(
@@ -613,7 +613,7 @@ def run_stream_thread(source_type: str = "field_thermal", source_param: str = ""
                     hud = visualizer.render_frame(res)
                     state.update_frame(hud, res)
                     elapsed = time.perf_counter() - t_frame
-                    time.sleep(max(0.002, 0.034 - elapsed))
+                    time.sleep(max(0.002, 0.068 - elapsed))
 
                 iteration += 1
                 if not loop:

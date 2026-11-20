@@ -125,65 +125,60 @@ class ThermalPerimeterSimulator:
                 bg[y, :] = 60.0 + f * 8.0
 
         elif self.environment == "facility":
-            # --- Environment 2: Tactical Perimeter Breach Sector (Crawl Cover -> Open Sprint) ---
-            # Left Sector (x=0..72): Elevated razor-wire & sensor beam barrier with low crawl gap below
-            # Right Sector (x=74..160): Open approach corridor leading to facility entrance gate
+            # --- Environment 2: Tactical Perimeter Breach Sector (Low Wire Crawl -> Open Run) ---
+            # Left Sector (x=0..66): Low-clearance double razor-wire barrier over infiltration ditch
+            # Right Sector (x=68..160): Breached opening leading along patrol road to facility compound
             horizon = 46
             for y in range(horizon):
-                bg[y, :] = 32.0 + (y / horizon) * 16.0
+                bg[y, :] = 34.0 + (y / horizon) * 16.0
 
             # Rolling distant ridge across horizon (natural LWIR terrain profile)
-            x_coords = np.linspace(0, 3.2 * np.pi, w)
-            ridge = np.sin(x_coords + 0.6) * 3.5 + np.cos(2.0 * x_coords) * 1.8
+            x_coords = np.linspace(0, 3.4 * np.pi, w)
+            ridge = np.sin(x_coords + 0.5) * 3.8 + np.cos(2.1 * x_coords) * 1.6
             for col in range(w):
                 sy = int(horizon - 6 + ridge[col])
                 bg[max(0, sy):horizon, col] = 44.0
 
-            # Ground thermal gradient from horizon to foreground (y=46..128: 56 -> 88 DN)
+            # Natural ground thermal gradient from horizon to foreground (y=46..128: 56 -> 88 DN)
             for y in range(horizon, h):
                 f = (y - horizon) / max(1, h - horizon)
-                bg[y, :] = 56.0 + f * 30.0
+                bg[y, :] = 56.0 + f * 32.0
 
-            # Background perimeter fence line running across mid-ground (y=62)
-            bg[62, :128] = 68.0
-            bg[66, :128] = 65.0
-            for px in range(10, 128, 22):
-                bg[56:70, px:px + 2] = 74.0
+            # Background main perimeter fence line (y=60..76) with 1px crisp steel posts
+            for dy in [0, 4, 8, 12]:
+                bg[60 + dy, :126] = 70.0
+            for px in range(10, 126, 22):
+                bg[58:76, px] = 80.0
 
-            # Right Flank: High-Security Facility Gatehouse & Perimeter Compound (x=120..159)
-            # Wall body matched to mid-frame thermal median (~65 DN) to prevent FPN destripe column halos
-            bg[38:70, 124:158] = 65.0           # Main concrete gatehouse facade
-            bg[35:38, 122:159] = 53.0           # Roof overhang cornice (3px horizontal trim)
-            bg[70:72, 124:158] = 74.0           # Concrete foundation plinth
-            bg[46:72, 118:121] = 74.0           # Entrance gate pillar
-            bg[43:48, 130:145] = 104.0          # Horizontal guardhouse observation window (5px tall)
-            bg[52:70, 133:142] = 71.0           # Steel personnel entry door
-            # Warm exterior transformer / HVAC unit on building flank (anchors AGC smoothly)
-            for ry in range(52, 66):
-                for rx in range(147, 156):
-                    dx = (rx - 151.5) / 4.0
-                    dy = (ry - 59.0) / 6.0
-                    bg[ry, rx] = 68.0 + 82.0 * math.exp(-0.85 * (dx * dx + dy * dy))
+            # Right Flank: Facility Security Outbuilding & Transformer Station (x=126..158)
+            bg[40:72, 128:158] = 66.0           # Concrete building wall (matched to column median)
+            bg[37:40, 126:159] = 54.0           # Roof eaves
+            bg[45:50, 133:146] = 98.0           # Warm interior window strip
+            # Subtle warm transformer radiator on right flank (stabilizes AGC naturally)
+            for ry in range(54, 66):
+                for rx in range(148, 156):
+                    dx = (rx - 152.0) / 3.8
+                    dy = (ry - 60.0) / 5.5
+                    bg[ry, rx] = 68.0 + 76.0 * math.exp(-0.85 * (dx * dx + dy * dy))
 
-            # Horizontal compacted dirt/asphalt infiltration trail (y=88..108)
-            for y in range(88, 108):
-                dist_c = abs(y - 98.0) / 10.0
-                bg[y, :] = 76.0 - dist_c * 7.0
-            bg[94:96, :] -= 3.0
-            bg[102:104, :] -= 3.0
+            # Horizontal compacted dirt/gravel patrol track across lower third (y=86..108)
+            for y in range(86, 108):
+                dist_c = abs(y - 97.0) / 11.0
+                bg[y, :] = 76.0 - dist_c * 6.0
+            bg[93:95, :] -= 2.5
+            bg[101:103, :] -= 2.5
 
-            # Left Sector (x=0..65): Elevated Low Razor-Wire & Pipe Barrier above Crawl Gap!
-            # Barrier occupies y=72..81, leaving a clear low crawl space at y=83..104 underneath
-            bg[73:76, 0:66] = 86.0             # Upper horizontal security pipe / beam
-            bg[80:82, 0:66] = 79.0             # Lower razor-wire tension cable
-            for col in range(0, 66):
-                coil_y = int(77 + math.sin(col * 0.85) * 2.8)
-                bg[coil_y, col] = 94.0
-            # Structural support stanchions for left barrier (ending at x=64 breach point!)
-            for px in [6, 25, 44, 64]:
-                bg[68:90, px:px + 2] = 90.0
-            # Small warm infrared sensor emitter mounted on the end stanchion (x=63..67, y=71..75)
-            bg[71:75, 63:67] = 132.0
+            # Left Sector (x=0..65): Low-Hanging Barbed/Concertina Wire Entanglement (y=75..83)
+            # Forces infiltrator to crawl low (y=88..102) until clearing the breach post at x=65
+            for dy in [75, 79, 82]:
+                bg[dy, 0:66] = 82.0
+            for col in range(0, 65):
+                c1 = int(78 + math.sin(col * 0.9) * 2.5)
+                c2 = int(79 + math.cos(col * 0.9) * 2.2)
+                bg[c1, col] = 89.0
+                bg[c2, col] = 84.0
+            for px in [8, 27, 46, 65]:
+                bg[72:89, px] = 88.0
 
         else:
             # --- Environment 3: Classic Border Perimeter ---
@@ -251,33 +246,34 @@ class ThermalPerimeterSimulator:
     ) -> np.ndarray:
         """
         Renders a physical LWIR human infiltrator executing a 3-phase tactical breach:
-          - Phase 1 (t <= 108): Low prone commando crawl under the outer barrier
-          - Phase 2 (108 < t < 128): Dynamic hands-and-knee push-up & stand-up transition
-          - Phase 3 (t >= 128): Full upright forward-leaning athletic sprint
-        Uses smooth Gaussian capsule distance fields for authentic LWIR thermal radiation.
+          - Phase 1 (t <= 110): Low horizontal commando crawl with phase-lagged elliptical
+            arm reach-plant-pull and bent-knee leg drive.
+          - Phase 2 (110 < t < 130): Dynamic hands-and-knee push-up & crouch-to-stand transition.
+          - Phase 3 (t >= 130): Natural upright human running with phase-lagged knee-lead /
+            foot-recovery kinematics (never collapses into a single vertical line at mid-stance).
         """
         patch = np.zeros((patch_h, patch_w), dtype=np.float32)
         py, px = np.ogrid[:patch_h, :patch_w]
         px_f = px.astype(np.float32)
         py_f = py.astype(np.float32)
 
-        # Posture transition parameter p in [0.0 (prone crawl) .. 1.0 (upright sprint)]
-        if t <= 108:
+        # Posture transition parameter p in [0.0 (prone crawl) .. 1.0 (upright run)]
+        if t <= 110:
             p = 0.0
-        elif t >= 128:
+        elif t >= 130:
             p = 1.0
         else:
-            u = (t - 108.0) / 20.0
-            p = u * u * (3.0 - 2.0 * u)  # Smoothstep transition
-        kneel = 4.0 * p * (1.0 - p)      # Peaks at p=0.5 during one-knee push-up
+            u = (t - 110.0) / 20.0
+            p = u * u * (3.0 - 2.0 * u)
+        kneel = 4.0 * p * (1.0 - p)  # Peaks at p=0.5 during one-knee push-up
 
         dir_s = 1.0 if is_forward else -1.0
         cx0 = patch_w * 0.50
         gy = patch_h * 0.88  # Fixed ground contact plane inside patch
 
-        # Phase oscillators for crawl (period=18) and sprint (period=11)
-        phi_c = (t / 18.0) * 2.0 * math.pi
-        phi_r = ((t - 118.0) / 11.0) * 2.0 * math.pi
+        # Deliberate crawl cycle (period=20 frames) and natural running cycle (period=14 frames)
+        phi_c = (t / 20.0) * 2.0 * math.pi
+        phi_r = ((t - 122.0) / 14.0) * 2.0 * math.pi
 
         def lerp2(a: Tuple[float, float], b: Tuple[float, float], w_p: float) -> Tuple[float, float]:
             return (a[0] + w_p * (b[0] - a[0]), a[1] + w_p * (b[1] - a[1]))
@@ -298,98 +294,98 @@ class ThermalPerimeterSimulator:
             np.maximum(patch, np.exp(-1.45 * d2) * temp, out=patch)
 
         # --- 1. TORSO & HEAD KINEMATICS ---
-        # Crawl core coords (relative x, absolute y)
-        hip_c = (-3.4, gy - 3.6)
-        sh_c = (4.6, gy - 5.2 - 0.4 * abs(math.sin(phi_c)))
-        head_c = (9.6, gy - 7.3 + 0.35 * math.sin(2.0 * phi_c))
+        # Crawl: elevated hands-and-knees tactical low stalk/crawl so dark space remains
+        # under the belly/torso, making alternating arms and knees/shins clearly visible!
+        hip_c = (-4.2, gy - 6.6 + 0.35 * math.sin(2.0 * phi_c))
+        sh_c = (3.8, gy - 7.5 - 0.40 * math.sin(2.0 * phi_c))
+        head_c = (7.6, gy - 9.0 + 0.30 * math.cos(2.0 * phi_c))
 
-        # Sprint core coords (athletic forward lean + natural running bounce)
-        bounce = 1.15 * abs(math.sin(phi_r))
-        hip_r = (-1.0, gy - 12.2 - bounce)
-        sh_r = (1.6, gy - 19.6 - bounce)
-        head_r = (2.8, gy - 24.8 - bounce)
+        # Run: natural upright forward-leaning human proportions + subtle stride bounce
+        bounce = 0.95 * abs(math.sin(phi_r))
+        hip_r = (-0.8, gy - 11.8 - bounce)
+        sh_r = (1.2, gy - 18.8 - bounce)
+        head_r = (2.1, gy - 23.2 - bounce)
 
         hip_rel = lerp2(hip_c, hip_r, p)
         sh_rel = lerp2(sh_c, sh_r, p)
-        # During push-up (kneel), chest rises slightly ahead of hips
-        sh_rel = (sh_rel[0], sh_rel[1] - 1.8 * kneel)
+        sh_rel = (sh_rel[0], sh_rel[1] - 1.5 * kneel)
         head_rel = lerp2(head_c, head_r, p)
-        head_rel = (head_rel[0], head_rel[1] - 1.6 * kneel)
+        head_rel = (head_rel[0], head_rel[1] - 1.4 * kneel)
 
         hip = to_canvas(*hip_rel)
         shoulder = to_canvas(*sh_rel)
         head = to_canvas(*head_rel)
-        neck = lerp2(shoulder, head, 0.48)
+        neck = lerp2(shoulder, head, 0.52)
 
-        # --- 2. LEGS (2-Segment Hip -> Knee -> Ankle -> Foot for Near & Far Legs) ---
-        for leg_idx, phase_off, heat_scale in [(0, math.pi, 0.75), (1, 0.0, 0.88)]:
-            # Crawl leg state (distinct bent-knee crawl drive vs extended trail leg)
-            c_kick = 0.5 * (1.0 + math.cos(phi_c + phase_off))
-            y_sep = -1.2 if leg_idx == 0 else 0.4
-            knee_c = (-8.0 + 4.8 * c_kick, gy - 1.5 - 3.2 * c_kick + y_sep)
-            ank_c = (-14.8 + 4.0 * c_kick, gy - 0.7 - 0.5 * c_kick + y_sep * 0.5)
+        # --- 2. LEGS (Distinct Under-Belly Knee Drive in Crawl -> Teardrop Stride in Run) ---
+        for leg_idx, phase_off, heat_scale in [(0, math.pi, 0.78), (1, 0.0, 0.92)]:
+            th_c = phi_c + phase_off
+            # Crawl leg: knee swings from forward under belly (x=-0.5) to extended back (x=-8.0)
+            # down at y=gy-1.2, clearly separated below the arched torso (gy-6.8)!
+            kx_c = hip_c[0] - 0.2 + 3.8 * math.sin(th_c + 0.25)
+            ky_c = gy - 1.3 - 1.4 * max(0.0, math.sin(th_c + 0.25))
+            ax_c = kx_c - 4.8 + 1.4 * math.sin(th_c - 0.35)
+            ay_c = gy - 0.5 - 1.5 * max(0.0, -math.cos(th_c))
 
-            # Sprint leg state (full dynamic stride swing + backward knee flexion)
+            # Run leg: knee leads ankle by 0.65 rad (37 deg) + recovering foot lifts 3.6px off ground
             th_r = phi_r + phase_off
-            a_thigh = 0.72 * math.sin(th_r) + 0.14
-            knee_flex = 0.48 + 0.65 * max(0.0, -math.cos(th_r - 0.35))
-            a_shin = a_thigh - knee_flex
-            l_thigh, l_shin = 6.3, 6.0
-            kx_r = hip_r[0] + l_thigh * math.sin(a_thigh)
-            ky_r = hip_r[1] + l_thigh * math.cos(a_thigh)
-            ax_r = kx_r + l_shin * math.sin(a_shin)
-            ay_r = min(gy, ky_r + l_shin * math.cos(a_shin))
+            kx_r = hip_r[0] + 0.9 + 4.1 * math.sin(th_r + 0.28)
+            ky_r = hip_r[1] + 5.6 - 1.4 * max(0.0, math.sin(th_r + 0.28))
+            ax_r = hip_r[0] - 0.5 + 5.4 * math.sin(th_r - 0.38)
+            ay_r = gy - 0.5 - 3.6 * max(0.0, -math.cos(th_r - 0.22))
 
-            knee_rel = lerp2(knee_c, (kx_r, ky_r), p)
-            ank_rel = lerp2(ank_c, (ax_r, ay_r), p)
+            knee_rel = lerp2((kx_c, ky_c), (kx_r, ky_r), p)
+            ank_rel = lerp2((ax_c, ay_c), (ax_r, ay_r), p)
 
-            # During stand-up transition, lead leg (leg_idx==1) steps forward under hip to push up
+            # Lead leg steps under hip during one-knee stand-up transition
             if leg_idx == 1:
-                knee_rel = (knee_rel[0] + 4.5 * kneel, knee_rel[1] - 1.8 * kneel)
-                ank_rel = (ank_rel[0] + 5.8 * kneel, min(gy, ank_rel[1] + 0.5 * kneel))
+                knee_rel = (knee_rel[0] + 3.2 * kneel, knee_rel[1] - 1.4 * kneel)
+                ank_rel = (ank_rel[0] + 4.2 * kneel, min(gy - 0.4, ank_rel[1] + 0.3 * kneel))
 
             knee = to_canvas(*knee_rel)
             ankle = to_canvas(*ank_rel)
-            foot = to_canvas(ank_rel[0] + 1.7, min(gy + 0.3, ank_rel[1] + 0.3))
+            foot = to_canvas(ank_rel[0] + (1.5 * p - 1.0 * (1.0 - p)), min(gy, ank_rel[1] + 0.25))
 
-            add_capsule(hip, knee, 1.65, intensity * heat_scale)
-            add_capsule(knee, ankle, 1.32, intensity * (heat_scale - 0.04))
-            add_capsule(ankle, foot, 1.15, intensity * (heat_scale - 0.08))
+            add_capsule(hip, knee, 1.45 + 0.20 * p, intensity * heat_scale)
+            add_capsule(knee, ankle, 1.25 + 0.12 * p, intensity * (heat_scale - 0.03))
+            add_capsule(ankle, foot, 1.12, intensity * (heat_scale - 0.07))
 
-        # --- 3. ARMS (2-Segment Shoulder -> Elbow -> Hand for Near & Far Arms) ---
-        for arm_idx, phase_off, heat_scale in [(0, math.pi, 0.76), (1, 0.0, 0.88)]:
-            # Crawl arm state (reaching out flat in front of head & pulling back)
-            c_reach = 0.5 * (1.0 + math.sin(phi_c + phase_off))
-            elb_c = (5.4 + 4.2 * c_reach, gy - 2.0 - 0.8 * c_reach)
-            hnd_c = (9.4 + 6.8 * c_reach, gy - 0.8 - 1.0 * max(0.0, math.cos(phi_c + phase_off)))
+        # --- 3. ARMS (Visible Downward-Reaching Crawl Stride -> Bent-Elbow Swing in Run) ---
+        for arm_idx, phase_off, heat_scale in [(0, math.pi, 0.78), (1, 0.0, 0.90)]:
+            th_c = phi_c + phase_off
+            # Crawl arm: extends down from shoulder (gy-7.5) to ground (gy-0.6), swinging
+            # from far forward in front of head (x=+11.5) back under chest (x=+1.2)!
+            ex_c = sh_c[0] + 1.2 + 3.2 * math.sin(th_c + 0.25)
+            ey_c = gy - 3.6 - 0.8 * max(0.0, math.cos(th_c))
+            hx_c = sh_c[0] + 2.8 + 5.2 * math.sin(th_c - 0.15)
+            hy_c = gy - 0.6 - 1.8 * max(0.0, math.cos(th_c + 0.25))
 
-            # Sprint arm state (vigorous counter-phase bent-elbow pumping)
+            # Run arm: counter-phase bent-elbow swing across torso
             th_a = phi_r + phase_off + math.pi
-            a_upper = 0.68 * math.sin(th_a) - 0.10
-            a_fore = a_upper + 1.35
-            ex_r = sh_r[0] + 4.4 * math.sin(a_upper)
-            ey_r = sh_r[1] + 4.4 * math.cos(a_upper)
-            hx_r = ex_r + 4.1 * math.sin(a_fore)
-            hy_r = ey_r + 4.1 * math.cos(a_fore)
+            a_up = 0.62 * math.sin(th_a) - 0.08
+            a_fo = a_up + 1.32
+            ex_r = sh_r[0] + 4.0 * math.sin(a_up)
+            ey_r = sh_r[1] + 4.0 * math.cos(a_up)
+            hx_r = ex_r + 3.7 * math.sin(a_fo)
+            hy_r = ey_r + 3.7 * math.cos(a_fo)
 
-            elb_rel = lerp2(elb_c, (ex_r, ey_r), p)
-            hnd_rel = lerp2(hnd_c, (hx_r, hy_r), p)
-            # Hands push off ground during early stand-up
-            hnd_rel = (hnd_rel[0] - 1.5 * kneel, hnd_rel[1] + 1.8 * kneel)
+            elb_rel = lerp2((ex_c, ey_c), (ex_r, ey_r), p)
+            hnd_rel = lerp2((hx_c, hy_c), (hx_r, hy_r), p)
+            hnd_rel = (hnd_rel[0] - 1.0 * kneel, hnd_rel[1] + 1.2 * kneel)
 
             elbow = to_canvas(*elb_rel)
             hand = to_canvas(*hnd_rel)
 
-            add_capsule(shoulder, elbow, 1.28, intensity * heat_scale)
-            add_capsule(elbow, hand, 1.15, intensity * (heat_scale + 0.04))
+            add_capsule(shoulder, elbow, 1.22, intensity * heat_scale)
+            add_capsule(elbow, hand, 1.12, intensity * (heat_scale + 0.04))
 
-        # --- 4. CORE TORSO, DISTINCT NECK & ROUND HUMAN HEAD ---
-        torso_r = 2.45 + 0.55 * p
+        # --- 4. VOLUMETRIC TORSO, CONNECTED NECK & ROUND HUMAN HEAD ---
+        # Thinner arched torso in crawl (1.95) preserves the dark gap above ground; broader in run (3.0)
+        torso_r = 1.95 + 1.05 * p
         add_capsule(hip, shoulder, torso_r, intensity * 0.92)
-        add_capsule(shoulder, neck, 1.20, intensity * 0.84)  # Narrower neck creates clear head separation
-        # Distinct round Gaussian human head (matches Perimeter Wire Human Crossing realism)
-        head_rad2 = ((px_f - head[0]) / (2.35 + 0.25 * p)) ** 2 + ((py_f - head[1]) / (2.25 + 0.35 * p)) ** 2
-        np.maximum(patch, np.exp(-1.55 * head_rad2) * intensity, out=patch)
+        add_capsule(shoulder, neck, 1.45, intensity * 0.88)
+        head_rad2 = ((px_f - head[0]) / (2.15 + 0.30 * p)) ** 2 + ((py_f - head[1]) / (2.00 + 0.45 * p)) ** 2
+        np.maximum(patch, np.exp(-1.45 * head_rad2) * intensity, out=patch)
 
         return patch
 
@@ -523,19 +519,19 @@ class ThermalPerimeterSimulator:
                     alpha = (t - anom.start_frame) / span
                     if anom.anomaly_type in ("crawler", "crawling_intruder"):
                         # 3-Phase Velocity Profile:
-                        # Phase 1 (t <= 108): Slow pulsed low-crawl under left barrier (alpha -> 0.0..0.44, clears x=64 post)
-                        # Phase 2 (108 < t < 128): Push-up & stand-up in clear zone x=74..85 (alpha -> 0.44..0.51)
-                        # Phase 3 (t >= 128): Rapid upright tactical sprint across courtyard (alpha -> 0.51..1.0)
-                        if t <= 108:
-                            u_c = max(0.0, (t - anom.start_frame) / max(1.0, 108.0 - anom.start_frame))
-                            surge = (0.35 / (2.0 * math.pi * 8.0)) * math.sin(2.0 * math.pi * 8.0 * u_c)
-                            alpha = 0.44 * np.clip(u_c - surge, 0.0, 1.0)
-                        elif t < 128:
-                            u_t = (t - 108.0) / 20.0
-                            alpha = 0.44 + 0.07 * (0.35 * u_t + 0.65 * (u_t * u_t))
+                        # Phase 1 (t <= 110): Slow pulsed low-crawl under left wire barrier (alpha -> 0.0..0.41)
+                        # Phase 2 (110 < t < 130): Stand-up transition past x=65 barrier post (alpha -> 0.41..0.47)
+                        # Phase 3 (t >= 130): Natural upright running pace toward facility (alpha -> 0.47..1.0)
+                        if t <= 110:
+                            u_c = max(0.0, (t - anom.start_frame) / max(1.0, 110.0 - anom.start_frame))
+                            surge = (0.30 / (2.0 * math.pi * 7.5)) * math.sin(2.0 * math.pi * 7.5 * u_c)
+                            alpha = 0.41 * np.clip(u_c - surge, 0.0, 1.0)
+                        elif t < 130:
+                            u_t = (t - 110.0) / 20.0
+                            alpha = 0.41 + 0.06 * (0.4 * u_t + 0.6 * (u_t * u_t))
                         else:
-                            u_r = min(1.0, (t - 128.0) / max(1.0, anom.end_frame - 128.0))
-                            alpha = 0.51 + 0.49 * u_r
+                            u_r = min(1.0, (t - 130.0) / max(1.0, anom.end_frame - 130.0))
+                            alpha = 0.47 + 0.53 * u_r
                         alpha = float(np.clip(alpha, 0.0, 1.0))
                     cx = (anom.start_pos[0] + alpha * (anom.end_pos[0] - anom.start_pos[0])) * w
                     cy = (anom.start_pos[1] + alpha * (anom.end_pos[1] - anom.start_pos[1])) * h
