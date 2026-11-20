@@ -125,34 +125,65 @@ class ThermalPerimeterSimulator:
                 bg[y, :] = 60.0 + f * 8.0
 
         elif self.environment == "facility":
-            # --- Environment 2: Critical High-Security Facility Perimeter Wall ---
-            horizon = 48
+            # --- Environment 2: Tactical Perimeter Breach Sector (Crawl Cover -> Open Sprint) ---
+            # Left Sector (x=0..72): Elevated razor-wire & sensor beam barrier with low crawl gap below
+            # Right Sector (x=74..160): Open approach corridor leading to facility entrance gate
+            horizon = 46
             for y in range(horizon):
-                bg[y, :] = 30.0 + (y / horizon) * 16.0
+                bg[y, :] = 32.0 + (y / horizon) * 16.0
 
-            # Distant facility roofline behind wall
-            bg[int(h * 0.28):horizon, int(w * 0.40):int(w * 0.75)] = 54.0
-
-            # Concrete perimeter wall (y=48 to y=76)
-            wall_top, wall_base = 48, 76
-            bg[wall_top:wall_base, :] = 58.0
-            bg[wall_top:wall_top + 3, :] = 50.0  # Coping cap
-            bg[wall_base - 2:wall_base + 1, :] = 66.0  # Footing
-
-            # Thin expansion seams every 36px (realistic concrete panels)
-            for px in range(12, w, 36):
-                bg[wall_top:wall_base, px] = 46.0
-
-            # Concertina razor wire coiled along the top of the wall
+            # Rolling distant ridge across horizon (natural LWIR terrain profile)
+            x_coords = np.linspace(0, 3.2 * np.pi, w)
+            ridge = np.sin(x_coords + 0.6) * 3.5 + np.cos(2.0 * x_coords) * 1.8
             for col in range(w):
-                coil_y = int(wall_top - 4 + math.sin(col * 0.75) * 3.0)
-                if 0 <= coil_y < h:
-                    bg[coil_y, col] = 76.0
+                sy = int(horizon - 6 + ridge[col])
+                bg[max(0, sy):horizon, col] = 44.0
 
-            # Crushed gravel security apron in foreground (y=76..128)
-            for y in range(wall_base, h):
-                f = (y - wall_base) / max(1, h - wall_base)
-                bg[y, :] = 68.0 + f * 10.0
+            # Ground thermal gradient from horizon to foreground (y=46..128: 56 -> 88 DN)
+            for y in range(horizon, h):
+                f = (y - horizon) / max(1, h - horizon)
+                bg[y, :] = 56.0 + f * 30.0
+
+            # Background perimeter fence line running across mid-ground (y=62)
+            bg[62, :128] = 68.0
+            bg[66, :128] = 65.0
+            for px in range(10, 128, 22):
+                bg[56:70, px:px + 2] = 74.0
+
+            # Right Flank: High-Security Facility Gatehouse & Perimeter Compound (x=120..159)
+            # Wall body matched to mid-frame thermal median (~65 DN) to prevent FPN destripe column halos
+            bg[38:70, 124:158] = 65.0           # Main concrete gatehouse facade
+            bg[35:38, 122:159] = 53.0           # Roof overhang cornice (3px horizontal trim)
+            bg[70:72, 124:158] = 74.0           # Concrete foundation plinth
+            bg[46:72, 118:121] = 74.0           # Entrance gate pillar
+            bg[43:48, 130:145] = 104.0          # Horizontal guardhouse observation window (5px tall)
+            bg[52:70, 133:142] = 71.0           # Steel personnel entry door
+            # Warm exterior transformer / HVAC unit on building flank (anchors AGC smoothly)
+            for ry in range(52, 66):
+                for rx in range(147, 156):
+                    dx = (rx - 151.5) / 4.0
+                    dy = (ry - 59.0) / 6.0
+                    bg[ry, rx] = 68.0 + 82.0 * math.exp(-0.85 * (dx * dx + dy * dy))
+
+            # Horizontal compacted dirt/asphalt infiltration trail (y=88..108)
+            for y in range(88, 108):
+                dist_c = abs(y - 98.0) / 10.0
+                bg[y, :] = 76.0 - dist_c * 7.0
+            bg[94:96, :] -= 3.0
+            bg[102:104, :] -= 3.0
+
+            # Left Sector (x=0..65): Elevated Low Razor-Wire & Pipe Barrier above Crawl Gap!
+            # Barrier occupies y=72..81, leaving a clear low crawl space at y=83..104 underneath
+            bg[73:76, 0:66] = 86.0             # Upper horizontal security pipe / beam
+            bg[80:82, 0:66] = 79.0             # Lower razor-wire tension cable
+            for col in range(0, 66):
+                coil_y = int(77 + math.sin(col * 0.85) * 2.8)
+                bg[coil_y, col] = 94.0
+            # Structural support stanchions for left barrier (ending at x=64 breach point!)
+            for px in [6, 25, 44, 64]:
+                bg[68:90, px:px + 2] = 90.0
+            # Small warm infrared sensor emitter mounted on the end stanchion (x=63..67, y=71..75)
+            bg[71:75, 63:67] = 132.0
 
         else:
             # --- Environment 3: Classic Border Perimeter ---
@@ -171,7 +202,8 @@ class ThermalPerimeterSimulator:
                 bg[:split_y, col] = np.clip(bg[:split_y, col] - 5.0, 30, 255)
 
         # Micro-texture terrain noise (gravel, dry soil, emissivity variations)
-        noise = self.rng.normal(0, 3.2, (h, w)).astype(np.float32)
+        terrain_std = 1.4 if self.environment == "facility" else 3.2
+        noise = self.rng.normal(0, terrain_std, (h, w)).astype(np.float32)
         noise = cv2.GaussianBlur(noise, (5, 5), 1.2)
         bg += noise
 
@@ -188,9 +220,7 @@ class ThermalPerimeterSimulator:
         fence = np.zeros((h, w), dtype=np.float32)
 
         if self.environment == "facility":
-            fence_y = int(h * 0.52)
-            # Barbed wire coils on top of concrete wall
-            fence[fence_y:fence_y + 3, :] = 0.7
+            # Concertina wire is already rendered cleanly on the wall crest
             return fence
 
         fence_y = int(h * 0.60)
@@ -219,64 +249,149 @@ class ThermalPerimeterSimulator:
     def _render_crawler_patch(
         self, t: int, patch_w: int, patch_h: int, intensity: float, is_forward: bool
     ) -> np.ndarray:
-        """Renders an unmistakable human soldier in prone commando crawl (leopard low-crawl)."""
+        """
+        Renders a physical LWIR human infiltrator executing a 3-phase tactical breach:
+          - Phase 1 (t <= 108): Low prone commando crawl under the outer barrier
+          - Phase 2 (108 < t < 128): Dynamic hands-and-knee push-up & stand-up transition
+          - Phase 3 (t >= 128): Full upright forward-leaning athletic sprint
+        Uses smooth Gaussian capsule distance fields for authentic LWIR thermal radiation.
+        """
         patch = np.zeros((patch_h, patch_w), dtype=np.float32)
         py, px = np.ogrid[:patch_h, :patch_w]
+        px_f = px.astype(np.float32)
+        py_f = py.astype(np.float32)
 
-        # Crawl cycle: 16 frames per complete stride
-        cycle = (t % 16) / 16.0
-        stride_phase = math.sin(cycle * 2 * math.pi)
-        stride_cos = math.cos(cycle * 2 * math.pi)
+        # Posture transition parameter p in [0.0 (prone crawl) .. 1.0 (upright sprint)]
+        if t <= 108:
+            p = 0.0
+        elif t >= 128:
+            p = 1.0
+        else:
+            u = (t - 108.0) / 20.0
+            p = u * u * (3.0 - 2.0 * u)  # Smoothstep transition
+        kneel = 4.0 * p * (1.0 - p)      # Peaks at p=0.5 during one-knee push-up
 
-        dir_sign = 1.0 if is_forward else -1.0
-        center_x = patch_w * 0.50
+        dir_s = 1.0 if is_forward else -1.0
+        cx0 = patch_w * 0.50
+        gy = patch_h * 0.88  # Fixed ground contact plane inside patch
 
-        # 1. Prone Torso (Fabric camouflage thermal signature ~145 DN)
-        torso_y = patch_h * 0.54 + stride_phase * 0.6
-        torso_cx = center_x - dir_sign * patch_w * 0.04
-        torso_rad = ((px - torso_cx) / (patch_w * 0.24 + 1e-5)) ** 2 + ((py - torso_y) / (patch_h * 0.22 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-1.3 * torso_rad) * (intensity * 0.62))
+        # Phase oscillators for crawl (period=18) and sprint (period=11)
+        phi_c = (t / 18.0) * 2.0 * math.pi
+        phi_r = ((t - 118.0) / 11.0) * 2.0 * math.pi
 
-        # 2. Elevated Head & Tactical Helmet
-        head_cx = center_x + dir_sign * patch_w * 0.32
-        head_cy = patch_h * 0.38 + stride_cos * 0.8
-        head_rad = ((px - head_cx) / (patch_w * 0.11 + 1e-5)) ** 2 + ((py - head_cy) / (patch_h * 0.20 + 1e-5)) ** 2
-        head_heat = np.exp(-1.8 * head_rad) * (intensity * 0.92)
-        helm_mask = (py < head_cy) & (px > head_cx - patch_w * 0.08) & (px < head_cx + patch_w * 0.08)
-        head_heat[helm_mask] *= 0.82
-        patch = np.maximum(patch, head_heat)
+        def lerp2(a: Tuple[float, float], b: Tuple[float, float], w_p: float) -> Tuple[float, float]:
+            return (a[0] + w_p * (b[0] - a[0]), a[1] + w_p * (b[1] - a[1]))
 
-        # 3. Arms: One arm reaching forward, one arm planted under chest
-        arm_reach = stride_phase * patch_w * 0.14
-        lead_elbow_x = center_x + dir_sign * (patch_w * 0.20 + arm_reach)
-        lead_elbow_y = patch_h * 0.64 + max(0.0, -stride_phase) * 1.6
-        arm1_rad = ((px - lead_elbow_x) / (patch_w * 0.10 + 1e-5)) ** 2 + ((py - lead_elbow_y) / (patch_h * 0.16 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-2.0 * arm1_rad) * (intensity * 0.74))
+        def to_canvas(rel_x: float, abs_y: float) -> Tuple[float, float]:
+            return (cx0 + dir_s * rel_x, abs_y)
 
-        trail_elbow_x = center_x + dir_sign * (patch_w * 0.06 - arm_reach * 0.7)
-        trail_elbow_y = patch_h * 0.68 + max(0.0, stride_phase) * 1.6
-        arm2_rad = ((px - trail_elbow_x) / (patch_w * 0.10 + 1e-5)) ** 2 + ((py - trail_elbow_y) / (patch_h * 0.16 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-2.0 * arm2_rad) * (intensity * 0.70))
+        def add_capsule(
+            p1: Tuple[float, float], p2: Tuple[float, float], radius: float, temp: float
+        ) -> None:
+            vx = p2[0] - p1[0]
+            vy = p2[1] - p1[1]
+            l2 = vx * vx + vy * vy + 1e-6
+            u_proj = np.clip(((px_f - p1[0]) * vx + (py_f - p1[1]) * vy) / l2, 0.0, 1.0)
+            dx = px_f - (p1[0] + u_proj * vx)
+            dy = py_f - (p1[1] + u_proj * vy)
+            d2 = (dx * dx + dy * dy) / (radius * radius + 1e-6)
+            np.maximum(patch, np.exp(-1.45 * d2) * temp, out=patch)
 
-        # 4. Pelvis & Low Waist
-        pelvis_cx = center_x - dir_sign * patch_w * 0.18
-        pelvis_cy = patch_h * 0.58
-        pelvis_rad = ((px - pelvis_cx) / (patch_w * 0.16 + 1e-5)) ** 2 + ((py - pelvis_cy) / (patch_h * 0.20 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-1.5 * pelvis_rad) * (intensity * 0.59))
+        # --- 1. TORSO & HEAD KINEMATICS ---
+        # Crawl core coords (relative x, absolute y)
+        hip_c = (-3.4, gy - 3.6)
+        sh_c = (4.6, gy - 5.2 - 0.4 * abs(math.sin(phi_c)))
+        head_c = (9.6, gy - 7.3 + 0.35 * math.sin(2.0 * phi_c))
 
-        # 5. Distinct Bent Knee (V-Shape outward crawl kick) & Trailing Boot
-        knee_push = stride_cos * patch_w * 0.09
-        knee_x = center_x - dir_sign * (patch_w * 0.30 - knee_push)
-        knee_y = patch_h * 0.70 + stride_phase * 1.4
-        knee_rad = ((px - knee_x) / (patch_w * 0.12 + 1e-5)) ** 2 + ((py - knee_y) / (patch_h * 0.17 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-2.0 * knee_rad) * (intensity * 0.68))
+        # Sprint core coords (athletic forward lean + natural running bounce)
+        bounce = 1.15 * abs(math.sin(phi_r))
+        hip_r = (-1.0, gy - 12.2 - bounce)
+        sh_r = (1.6, gy - 19.6 - bounce)
+        head_r = (2.8, gy - 24.8 - bounce)
 
-        boot_x = center_x - dir_sign * (patch_w * 0.44 + stride_cos * patch_w * 0.06)
-        boot_y = patch_h * 0.66 - stride_phase * 1.0
-        boot_rad = ((px - boot_x) / (patch_w * 0.10 + 1e-5)) ** 2 + ((py - boot_y) / (patch_h * 0.14 + 1e-5)) ** 2
-        patch = np.maximum(patch, np.exp(-2.2 * boot_rad) * (intensity * 0.64))
+        hip_rel = lerp2(hip_c, hip_r, p)
+        sh_rel = lerp2(sh_c, sh_r, p)
+        # During push-up (kneel), chest rises slightly ahead of hips
+        sh_rel = (sh_rel[0], sh_rel[1] - 1.8 * kneel)
+        head_rel = lerp2(head_c, head_r, p)
+        head_rel = (head_rel[0], head_rel[1] - 1.6 * kneel)
 
-        return cv2.GaussianBlur(patch, (3, 3), 0.7)
+        hip = to_canvas(*hip_rel)
+        shoulder = to_canvas(*sh_rel)
+        head = to_canvas(*head_rel)
+        neck = lerp2(shoulder, head, 0.48)
+
+        # --- 2. LEGS (2-Segment Hip -> Knee -> Ankle -> Foot for Near & Far Legs) ---
+        for leg_idx, phase_off, heat_scale in [(0, math.pi, 0.75), (1, 0.0, 0.88)]:
+            # Crawl leg state (distinct bent-knee crawl drive vs extended trail leg)
+            c_kick = 0.5 * (1.0 + math.cos(phi_c + phase_off))
+            y_sep = -1.2 if leg_idx == 0 else 0.4
+            knee_c = (-8.0 + 4.8 * c_kick, gy - 1.5 - 3.2 * c_kick + y_sep)
+            ank_c = (-14.8 + 4.0 * c_kick, gy - 0.7 - 0.5 * c_kick + y_sep * 0.5)
+
+            # Sprint leg state (full dynamic stride swing + backward knee flexion)
+            th_r = phi_r + phase_off
+            a_thigh = 0.72 * math.sin(th_r) + 0.14
+            knee_flex = 0.48 + 0.65 * max(0.0, -math.cos(th_r - 0.35))
+            a_shin = a_thigh - knee_flex
+            l_thigh, l_shin = 6.3, 6.0
+            kx_r = hip_r[0] + l_thigh * math.sin(a_thigh)
+            ky_r = hip_r[1] + l_thigh * math.cos(a_thigh)
+            ax_r = kx_r + l_shin * math.sin(a_shin)
+            ay_r = min(gy, ky_r + l_shin * math.cos(a_shin))
+
+            knee_rel = lerp2(knee_c, (kx_r, ky_r), p)
+            ank_rel = lerp2(ank_c, (ax_r, ay_r), p)
+
+            # During stand-up transition, lead leg (leg_idx==1) steps forward under hip to push up
+            if leg_idx == 1:
+                knee_rel = (knee_rel[0] + 4.5 * kneel, knee_rel[1] - 1.8 * kneel)
+                ank_rel = (ank_rel[0] + 5.8 * kneel, min(gy, ank_rel[1] + 0.5 * kneel))
+
+            knee = to_canvas(*knee_rel)
+            ankle = to_canvas(*ank_rel)
+            foot = to_canvas(ank_rel[0] + 1.7, min(gy + 0.3, ank_rel[1] + 0.3))
+
+            add_capsule(hip, knee, 1.65, intensity * heat_scale)
+            add_capsule(knee, ankle, 1.32, intensity * (heat_scale - 0.04))
+            add_capsule(ankle, foot, 1.15, intensity * (heat_scale - 0.08))
+
+        # --- 3. ARMS (2-Segment Shoulder -> Elbow -> Hand for Near & Far Arms) ---
+        for arm_idx, phase_off, heat_scale in [(0, math.pi, 0.76), (1, 0.0, 0.88)]:
+            # Crawl arm state (reaching out flat in front of head & pulling back)
+            c_reach = 0.5 * (1.0 + math.sin(phi_c + phase_off))
+            elb_c = (5.4 + 4.2 * c_reach, gy - 2.0 - 0.8 * c_reach)
+            hnd_c = (9.4 + 6.8 * c_reach, gy - 0.8 - 1.0 * max(0.0, math.cos(phi_c + phase_off)))
+
+            # Sprint arm state (vigorous counter-phase bent-elbow pumping)
+            th_a = phi_r + phase_off + math.pi
+            a_upper = 0.68 * math.sin(th_a) - 0.10
+            a_fore = a_upper + 1.35
+            ex_r = sh_r[0] + 4.4 * math.sin(a_upper)
+            ey_r = sh_r[1] + 4.4 * math.cos(a_upper)
+            hx_r = ex_r + 4.1 * math.sin(a_fore)
+            hy_r = ey_r + 4.1 * math.cos(a_fore)
+
+            elb_rel = lerp2(elb_c, (ex_r, ey_r), p)
+            hnd_rel = lerp2(hnd_c, (hx_r, hy_r), p)
+            # Hands push off ground during early stand-up
+            hnd_rel = (hnd_rel[0] - 1.5 * kneel, hnd_rel[1] + 1.8 * kneel)
+
+            elbow = to_canvas(*elb_rel)
+            hand = to_canvas(*hnd_rel)
+
+            add_capsule(shoulder, elbow, 1.28, intensity * heat_scale)
+            add_capsule(elbow, hand, 1.15, intensity * (heat_scale + 0.04))
+
+        # --- 4. CORE TORSO, DISTINCT NECK & ROUND HUMAN HEAD ---
+        torso_r = 2.45 + 0.55 * p
+        add_capsule(hip, shoulder, torso_r, intensity * 0.92)
+        add_capsule(shoulder, neck, 1.20, intensity * 0.84)  # Narrower neck creates clear head separation
+        # Distinct round Gaussian human head (matches Perimeter Wire Human Crossing realism)
+        head_rad2 = ((px_f - head[0]) / (2.35 + 0.25 * p)) ** 2 + ((py_f - head[1]) / (2.25 + 0.35 * p)) ** 2
+        np.maximum(patch, np.exp(-1.55 * head_rad2) * intensity, out=patch)
+
+        return patch
 
     def _render_vehicle_patch(
         self, t: int, patch_w: int, patch_h: int, intensity: float, is_forward: bool
@@ -404,7 +519,24 @@ class ThermalPerimeterSimulator:
             for anom in anomalies:
                 if anom.start_frame <= t <= anom.end_frame:
                     is_anomaly = 1
-                    alpha = (t - anom.start_frame) / max(1, (anom.end_frame - anom.start_frame))
+                    span = max(1, (anom.end_frame - anom.start_frame))
+                    alpha = (t - anom.start_frame) / span
+                    if anom.anomaly_type in ("crawler", "crawling_intruder"):
+                        # 3-Phase Velocity Profile:
+                        # Phase 1 (t <= 108): Slow pulsed low-crawl under left barrier (alpha -> 0.0..0.44, clears x=64 post)
+                        # Phase 2 (108 < t < 128): Push-up & stand-up in clear zone x=74..85 (alpha -> 0.44..0.51)
+                        # Phase 3 (t >= 128): Rapid upright tactical sprint across courtyard (alpha -> 0.51..1.0)
+                        if t <= 108:
+                            u_c = max(0.0, (t - anom.start_frame) / max(1.0, 108.0 - anom.start_frame))
+                            surge = (0.35 / (2.0 * math.pi * 8.0)) * math.sin(2.0 * math.pi * 8.0 * u_c)
+                            alpha = 0.44 * np.clip(u_c - surge, 0.0, 1.0)
+                        elif t < 128:
+                            u_t = (t - 108.0) / 20.0
+                            alpha = 0.44 + 0.07 * (0.35 * u_t + 0.65 * (u_t * u_t))
+                        else:
+                            u_r = min(1.0, (t - 128.0) / max(1.0, anom.end_frame - 128.0))
+                            alpha = 0.51 + 0.49 * u_r
+                        alpha = float(np.clip(alpha, 0.0, 1.0))
                     cx = (anom.start_pos[0] + alpha * (anom.end_pos[0] - anom.start_pos[0])) * w
                     cy = (anom.start_pos[1] + alpha * (anom.end_pos[1] - anom.start_pos[1])) * h
 
@@ -475,8 +607,10 @@ class ThermalPerimeterSimulator:
 
             # Microbolometer sensor degradation effects
             if add_sensor_defects:
-                frame += fpn_cols[None, :]
-                netd_noise = self.rng.normal(0, 3.8, (h, w)).astype(np.float32)
+                fpn_scale = 0.55 if self.environment == "facility" else 1.0
+                netd_std = 2.2 if self.environment == "facility" else 3.8
+                frame += fpn_cols[None, :] * fpn_scale
+                netd_noise = self.rng.normal(0, netd_std, (h, w)).astype(np.float32)
                 frame += netd_noise
 
             raw_frames[t] = np.clip(frame, 0, 255).astype(np.uint8)

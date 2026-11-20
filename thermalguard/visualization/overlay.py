@@ -177,8 +177,8 @@ class DashboardVisualizer:
                 err = result.error_map
                 p_thresh = max(float(np.percentile(err, 98.2)), 0.08)
                 blob_mask = (err >= p_thresh).astype(np.uint8)
-                # Morphological close bridges vehicle wheels, engine, and body into a single coherent entity
-                blob_mask = cv2.morphologyEx(blob_mask, cv2.MORPH_CLOSE, np.ones((7, 15), np.uint8))
+                # Morphological close bridges vehicle wheels, engine, and human limbs into a single coherent entity
+                blob_mask = cv2.morphologyEx(blob_mask, cv2.MORPH_CLOSE, np.ones((11, 15), np.uint8))
                 contours, _ = cv2.findContours(blob_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
                 scale_x = sub_w / max(1, err.shape[1])
@@ -190,13 +190,13 @@ class DashboardVisualizer:
                     main_cnt = max(valid_cnts, key=cv2.contourArea)
                     bx, by, bw, bh = cv2.boundingRect(main_cnt)
 
-                    # Merge any nearby contours (e.g. trailing exhaust plume or secondary wheel)
+                    # Merge any nearby contours (e.g. trailing exhaust plume, wheel, or sprinting legs)
                     for other_c in valid_cnts:
                         if other_c is main_cnt:
                             continue
                         ox, oy, ow, oh = cv2.boundingRect(other_c)
                         # Check horizontal and vertical proximity
-                        if abs(ox - (bx + bw // 2)) < 40 and abs(oy - by) < 18:
+                        if abs((ox + ow // 2) - (bx + bw // 2)) < 40 and abs((oy + oh // 2) - (by + bh // 2)) < 26:
                             nx1 = min(bx, ox)
                             ny1 = min(by, oy)
                             nx2 = max(bx + bw, ox + ow)
