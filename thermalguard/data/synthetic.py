@@ -241,40 +241,113 @@ class ThermalPerimeterSimulator:
 
         return fence
 
+    @staticmethod
+    def _crawler_world_x(t: int, start_frame: int, end_frame: int, start_x: float, end_x: float) -> float:
+        """
+        Computes smooth, physically continuous world-X position for the 3-phase infiltrator:
+          - Phase 1 (t <= 112): Deliberate pulsed low commando crawl (start_x -> x_crawl_end)
+          - Phase 2 (112 < t < 132): Grounded push-up & stand-up crouch (x_crawl_end -> x_run_start)
+          - Phase 3 (t >= 132): Constant-velocity athletic run synced to 2-Bone IK foot plants
+        """
+        dist = end_x - start_x
+        x_crawl_end = start_x + 0.41 * dist
+        x_run_start = start_x + 0.49 * dist
+
+        if t <= 112:
+            u_c = max(0.0, (t - start_frame) / max(1.0, 112.0 - start_frame))
+            # 7 half-strokes (3.5 full 24-frame crawl cycles) with pull-phase forward surge
+            surge = (0.34 / (2.0 * math.pi * 7.0)) * math.sin(2.0 * math.pi * 7.0 * u_c)
+            return start_x + (x_crawl_end - start_x) * float(np.clip(u_c - surge, 0.0, 1.0))
+        if t < 132:
+            u_t = (t - 112.0) / 20.0
+            # Slow down gently to plant front foot, then accelerate smoothly into run velocity
+            ease = 0.35 * u_t + 0.65 * (u_t * u_t)
+            return x_crawl_end + (x_run_start - x_crawl_end) * ease
+        u_r = min(1.0, (t - 132.0) / max(1.0, float(end_frame - 132)))
+        return x_run_start + (end_x - x_run_start) * u_r
+
+    @staticmethod
+    def _solve_2bone_ik(
+        root: Tuple[float, float],
+        target: Tuple[float, float],
+        l1: float,
+        l2: float,
+        bend_dir: float,
+    ) -> Tuple[float, float]:
+        """Analytical 2-bone Inverse Kinematics solver (guarantees rigid bones & natural joint bends)."""
+        dx = target[0] - root[0]
+        dy = target[1] - root[1]
+        dist = math.hypot(dx, dy)
+        min_d = abs(l1 - l2) + 0.15
+        max_d = (l1 + l2) - 0.08
+        d = max(min_d, min(max_d, dist))
+        ux = dx / max(dist, 1e-5)
+        uy = dy / max(dist, 1e-5)
+        cos_a = max(-1.0, min(1.0, (l1 * l1 + d * d - l2 * l2) / (2.0 * l1 * d)))
+        sin_a = math.sqrt(max(0.0, 1.0 - cos_a * cos_a))
+        # Perpendicular vector pointing forward (+x) when limb points downward (+y)
+        px_v = uy
+        py_v = -ux
+        jx = root[0] + l1 * (cos_a * ux + bend_dir * sin_a * px_v)
+        jy = root[1] + l1 * (cos_a * uy + bend_dir * sin_a * py_v)
+        return (jx, jy)
+
     def _render_crawler_patch(
-        self, t: int, patch_w: int, patch_h: int, intensity: float, is_forward: bool
+        self,
+        t: int,
+        patch_w: int,
+        patch_h: int,
+        intensity: float,
+        is_forward: bool,
+        world_x: float = 80.0,
+        start_x: float = 12.8,
+        end_x: float = 152.0,
+        start_frame: int = 28,
+        end_frame: int = 195,
+        frac_x: float = 0.0,
     ) -> np.ndarray:
         """
-        Renders a physical LWIR human infiltrator executing a 3-phase tactical breach:
-          - Phase 1 (t <= 110): Low horizontal commando crawl with phase-lagged elliptical
-            arm reach-plant-pull and bent-knee leg drive.
-          - Phase 2 (110 < t < 130): Dynamic hands-and-knee push-up & crouch-to-stand transition.
-          - Phase 3 (t >= 130): Natural upright human running with phase-lagged knee-lead /
-            foot-recovery kinematics (never collapses into a single vertical line at mid-stance).
+        Renders a physically grounded LWIR human infiltrator using World-Space Ground-Locked
+        2-Bone Inverse Kinematics (zero foot/hand skating) and anatomically tapered thermal
+        body segments across 3 seamless phases:
+          - Phase 1 (t <= 112): True low human forearm/knee commando crawl (belly low, hands & knees locked to dirt)
+          - Phase 2 (112 < t < 132): Grounded one-knee push-up & sprinter crouch rise
+          - Phase 3 (t >= 132): Zero-slip athletic tactical run with natural knee compression & heel recovery
         """
         patch = np.zeros((patch_h, patch_w), dtype=np.float32)
         py, px = np.ogrid[:patch_h, :patch_w]
         px_f = px.astype(np.float32)
         py_f = py.astype(np.float32)
 
-        # Posture transition parameter p in [0.0 (prone crawl) .. 1.0 (upright run)]
-        if t <= 110:
+        # Smooth posture blend p in [0.0 (low crawl) .. 1.0 (upright run)]
+        if t <= 112:
             p = 0.0
-        elif t >= 130:
+        elif t >= 132:
             p = 1.0
         else:
-            u = (t - 110.0) / 20.0
+            u = (t - 112.0) / 20.0
             p = u * u * (3.0 - 2.0 * u)
-        kneel = 4.0 * p * (1.0 - p)  # Peaks at p=0.5 during one-knee push-up
+        kneel = 4.0 * p * (1.0 - p)
 
         dir_s = 1.0 if is_forward else -1.0
-        cx0 = patch_w * 0.50
-        gy = patch_h * 0.88  # Fixed ground contact plane inside patch
+        cx0 = patch_w * 0.50 + frac_x  # Sub-pixel accurate center eliminates 1px motion jitter!
+        gy = patch_h * 0.88            # Ground contact plane inside patch
 
-        # Deliberate crawl cycle (period=20 frames) and even-harmonic 12-frame running cycle
-        # (offset -122.30 straddles the +4 deg shin-crossing at -9 deg and +21 deg on every single step!)
-        phi_c = (t / 20.0) * 2.0 * math.pi
-        phi_r = ((t - 122.30) / 12.0) * 2.0 * math.pi
+        dist_total = end_x - start_x
+        x_crawl_end = start_x + 0.41 * dist_total
+        x_run_start = start_x + 0.49 * dist_total
+
+        # Crawl stride synced to world distance covered per 24-frame cycle
+        crawl_period = 24.0
+        crawl_cycles_total = max(1.0, (112.0 - start_frame) / crawl_period)
+        crawl_stride_w = (x_crawl_end - start_x) / crawl_cycles_total
+        cycle_c = (t - start_frame) / crawl_period
+
+        # Run stride synced to EXACT world distance covered per 13-frame cycle (true running speed, ZERO foot skate!)
+        run_period = 13.0
+        v_run = (end_x - x_run_start) / max(1.0, float(end_frame - 132))
+        run_stride_w = v_run * run_period
+        cycle_r = (t - 132.0) / run_period
 
         def lerp2(a: Tuple[float, float], b: Tuple[float, float], w_p: float) -> Tuple[float, float]:
             return (a[0] + w_p * (b[0] - a[0]), a[1] + w_p * (b[1] - a[1]))
@@ -282,8 +355,13 @@ class ThermalPerimeterSimulator:
         def to_canvas(rel_x: float, abs_y: float) -> Tuple[float, float]:
             return (cx0 + dir_s * rel_x, abs_y)
 
-        def add_capsule(
-            p1: Tuple[float, float], p2: Tuple[float, float], radius: float, temp: float
+        def add_tapered_capsule(
+            p1: Tuple[float, float],
+            p2: Tuple[float, float],
+            r1: float,
+            r2: float,
+            temp1: float,
+            temp2: float,
         ) -> None:
             vx = p2[0] - p1[0]
             vy = p2[1] - p1[1]
@@ -291,112 +369,186 @@ class ThermalPerimeterSimulator:
             u_proj = np.clip(((px_f - p1[0]) * vx + (py_f - p1[1]) * vy) / l2, 0.0, 1.0)
             dx = px_f - (p1[0] + u_proj * vx)
             dy = py_f - (p1[1] + u_proj * vy)
-            d2 = (dx * dx + dy * dy) / (radius * radius + 1e-6)
-            np.maximum(patch, np.exp(-1.45 * d2) * temp, out=patch)
+            rad = r1 + u_proj * (r2 - r1)
+            temp = temp1 + u_proj * (temp2 - temp1)
+            d2 = (dx * dx + dy * dy) / (rad * rad + 1e-6)
+            np.maximum(patch, np.exp(-1.55 * d2) * temp, out=patch)
 
-        # --- 1. TORSO & HEAD KINEMATICS ---
-        # Crawl (p=0): elevated hands-and-knees tactical low stalk/crawl (KEEP 100% UNCHANGED!)
-        hip_c = (-4.2, gy - 6.6 + 0.35 * math.sin(2.0 * phi_c))
-        sh_c = (3.8, gy - 7.5 - 0.40 * math.sin(2.0 * phi_c))
-        head_c = (7.6, gy - 9.0 + 0.30 * math.cos(2.0 * phi_c))
+        # --- 1. TORSO & HEAD ANATOMY ---
+        # Phase 1 (Crawl): Low horizontal human army-crawl posture (forearms & knees low, NOT dog stance)
+        crawl_bob = math.sin(4.0 * math.pi * cycle_c)
+        hip_c = (-4.0, gy - 4.0 + 0.30 * crawl_bob)
+        sh_c = (4.0, gy - 4.9 - 0.30 * crawl_bob)
+        head_c = (8.0, gy - 6.6 + 0.25 * math.cos(4.0 * math.pi * cycle_c))
 
-        # Run (p=1): athletic forward-leaning sprinter proportions + natural flight bounce
-        bounce = 1.05 * abs(math.sin(phi_r))
-        hip_r = (-1.0, gy - 12.2 - bounce)
-        sh_r = (1.6, gy - 19.6 - bounce)
-        head_r = (2.7, gy - 24.2 - bounce)
+        # Phase 3 (Run): Tall, straight athletic sprint posture (hip height ~ L1+L2 eliminates squatting!)
+        # Slight compression at mid-stance (f=0.18), crisp airborne lift during flight (f=0.45)
+        run_bounce = 0.45 * math.cos(4.0 * math.pi * (cycle_r - 0.18)) - 0.35
+        hip_r = (-0.8, gy - 11.9 + run_bounce)
+        sh_r = (1.5, gy - 18.9 + run_bounce)
+        head_r = (2.5, gy - 23.2 + run_bounce)
 
         hip_rel = lerp2(hip_c, hip_r, p)
         sh_rel = lerp2(sh_c, sh_r, p)
-        sh_rel = (sh_rel[0], sh_rel[1] - 1.5 * kneel)
+        # During stand-up transition, chest pushes up ahead of hips (realistic push-up -> crouch)
+        sh_rel = (sh_rel[0] + 0.8 * kneel, sh_rel[1] - 2.0 * kneel)
         head_rel = lerp2(head_c, head_r, p)
-        head_rel = (head_rel[0], head_rel[1] - 1.4 * kneel)
+        head_rel = (head_rel[0] + 1.1 * kneel, head_rel[1] - 1.8 * kneel)
 
         hip = to_canvas(*hip_rel)
         shoulder = to_canvas(*sh_rel)
         head = to_canvas(*head_rel)
-        neck = lerp2(shoulder, head, 0.50)
+        neck = lerp2(shoulder, head, 0.52)
 
-        # --- 2. LEGS (Crawl unchanged; Run uses rigid-bone polar kinematics with Figure-4 mid-stance!) ---
-        for leg_idx, phase_off, c_heat, r_heat in [(0, math.pi, 0.78, 0.76), (1, 0.0, 0.92, 0.90)]:
-            heat_scale = (1.0 - p) * c_heat + p * r_heat
-            th_c = phi_c + phase_off
-            # Crawl leg (100% unchanged)
-            kx_c = hip_c[0] - 0.2 + 3.8 * math.sin(th_c + 0.25)
-            ky_c = gy - 1.3 - 1.4 * max(0.0, math.sin(th_c + 0.25))
-            ax_c = kx_c - 4.8 + 1.4 * math.sin(th_c - 0.35)
-            ay_c = gy - 0.5 - 1.5 * max(0.0, -math.cos(th_c))
+        # --- 2. GROUND-LOCKED 2-BONE IK LEGS ---
+        for leg_idx, phase_off, heat_scale in [(0, 0.5, 0.74), (1, 0.0, 0.88)]:
+            # (a) Crawl Leg (World-space ground-locked knee pushes pelvis forward; boot trails flat behind!)
+            ph_c = cycle_c + phase_off
+            kc = math.floor(ph_c)
+            fc = ph_c - kc
+            knee_plant_w = start_x - 2.6 + (kc - phase_off) * crawl_stride_w
+            if fc < 0.56:
+                # Knee locked to ground pushing body forward
+                kwx = knee_plant_w
+                kwy = gy - 1.5
+                bwx = kwx - 5.4
+                bwy = gy - 0.55
+            else:
+                # Knee lifts gently and draws forward to next ground grip
+                sc = (fc - 0.56) / 0.44
+                ssc = sc * sc * (3.0 - 2.0 * sc)
+                kwx = knee_plant_w + ssc * crawl_stride_w
+                lift_c = math.sin(math.pi * sc)
+                kwy = gy - 1.5 - 2.2 * lift_c
+                bwx = kwx - 5.0 + 0.9 * lift_c
+                bwy = gy - 0.55 - 0.8 * lift_c
+            knee_c_rel = (dir_s * (kwx - world_x), kwy)
+            ank_c_rel = (dir_s * (bwx - world_x), bwy)
 
-            # Run leg: rigid-bone polar angles (l_thigh=6.3, l_shin=6.0)
-            # Fast mid-swing snap (tanh) + Figure-4 rear heel kick ensures every single frame has 2 distinct legs!
-            th_r = phi_r + phase_off
-            s_snap = math.tanh(1.85 * math.sin(th_r)) / 0.9517
-            a_thigh = 0.05 + 0.74 * s_snap + 0.12 * max(0.0, math.cos(th_r + 0.15))
-            knee_flex = 0.14 + 1.48 * (max(0.0, math.cos(th_r + 0.35)) ** 1.3)
-            a_shin = a_thigh - knee_flex
+            # (b) Run Leg (True running gait: 36% ground-locked stance + 64% airborne swing & rear heel kick!)
+            ph_r = cycle_r + phase_off
+            kr = math.floor(ph_r)
+            fr = ph_r - kr
+            # Ground contact sweeps symmetrically from +0.20*stride (strike) -> -0.16*stride (toe-off) with ZERO slip!
+            foot_plant_w = x_run_start + 0.20 * run_stride_w + (kr - phase_off) * run_stride_w
+            if fr < 0.36:
+                # STANCE: Foot 100% locked to exact ground pixel!
+                fwx = foot_plant_w
+                fwy = gy - 0.30
+            else:
+                # AIRBORNE SWING: Heel folds behind hip during early swing (sr^1.85 delay),
+                # then drives knee high and whips foot forward to strike in front!
+                sr = (fr - 0.36) / 0.64
+                ssr = sr ** 1.85
+                kick_back = -1.6 * math.sin(math.pi * sr) * max(0.0, 1.0 - 1.4 * sr)
+                fwx = foot_plant_w + ssr * run_stride_w + kick_back
+                arc = (math.sin(math.pi * sr) ** 0.80) * (1.0 + 0.28 * math.cos(math.pi * sr))
+                fwy = gy - 0.30 - 5.2 * arc
+            foot_r_rel = (dir_s * (fwx - world_x), fwy)
+            # L1=6.2, L2=5.8 -> L1+L2=12.0 matches hip height (11.9) for tall straight stance & crisp swing bend!
+            knee_r_rel = self._solve_2bone_ik(hip_r, foot_r_rel, 6.2, 5.8, bend_dir=+1.0)
 
-            l_thigh, l_shin = 6.3, 6.0
-            kx_r = hip_r[0] + l_thigh * math.sin(a_thigh)
-            ky_r = hip_r[1] + l_thigh * math.cos(a_thigh)
-            ax_r = kx_r + l_shin * math.sin(a_shin)
-            ay_r = min(gy - 0.2, ky_r + l_shin * math.cos(a_shin))
-
-            knee_rel = lerp2((kx_c, ky_c), (kx_r, ky_r), p)
-            ank_rel = lerp2((ax_c, ay_c), (ax_r, ay_r), p)
-
-            # Lead leg steps under hip during one-knee stand-up transition
-            if leg_idx == 1:
-                knee_rel = (knee_rel[0] + 3.2 * kneel, knee_rel[1] - 1.4 * kneel)
-                ank_rel = (ank_rel[0] + 4.2 * kneel, min(gy - 0.4, ank_rel[1] + 0.3 * kneel))
+            # (c) Stand-Up Blend: during kneel, lead foot plants firmly on dirt under hip to push up!
+            if 0.0 < p < 1.0:
+                if leg_idx == 1:
+                    plant_up = (dir_s * (x_crawl_end + 5.0 - world_x), gy - 0.35)
+                    foot_mid = lerp2(ank_c_rel, foot_r_rel, p)
+                    ank_rel = lerp2(foot_mid, plant_up, kneel * 0.85)
+                else:
+                    plant_back = (dir_s * (x_crawl_end - 3.5 - world_x), gy - 0.45)
+                    foot_mid = lerp2(ank_c_rel, foot_r_rel, p)
+                    ank_rel = lerp2(foot_mid, plant_back, kneel * 0.65)
+                knee_ik_mid = self._solve_2bone_ik(hip_rel, ank_rel, 6.2, 5.8, bend_dir=+1.0)
+                knee_rel = lerp2(lerp2(knee_c_rel, knee_r_rel, p), knee_ik_mid, min(1.0, p * 1.4))
+            else:
+                knee_rel = knee_c_rel if p == 0.0 else knee_r_rel
+                ank_rel = ank_c_rel if p == 0.0 else foot_r_rel
 
             knee = to_canvas(*knee_rel)
             ankle = to_canvas(*ank_rel)
-            foot_ang = a_shin + 1.15
-            fx_r = ank_rel[0] + (1.6 * math.sin(foot_ang) if p > 0.5 else -1.0)
-            fy_r = min(gy, ank_rel[1] + (1.2 * math.cos(foot_ang) if p > 0.5 else 0.25))
-            foot = to_canvas(fx_r, fy_r)
+            foot_tip_dx = 1.6 if p > 0.3 else -1.1
+            foot = to_canvas(ank_rel[0] + foot_tip_dx, min(gy, ank_rel[1] + 0.25))
 
-            add_capsule(hip, knee, 1.45 + 0.18 * p, intensity * heat_scale)
-            add_capsule(knee, ankle, 1.25 + 0.08 * p, intensity * (heat_scale - 0.03))
-            add_capsule(ankle, foot, 1.12, intensity * (heat_scale - 0.06))
+            # Anatomically tapered leg (full muscular thigh -> narrower knee -> calf -> cooler boot)
+            add_tapered_capsule(
+                hip, knee,
+                1.70 + 0.15 * p, 1.32 + 0.05 * p,
+                intensity * heat_scale, intensity * (heat_scale - 0.04),
+            )
+            add_tapered_capsule(
+                knee, ankle,
+                1.30 + 0.05 * p, 1.02,
+                intensity * (heat_scale - 0.04), intensity * (heat_scale - 0.10),
+            )
+            add_tapered_capsule(
+                ankle, foot,
+                1.00, 0.90,
+                intensity * (heat_scale - 0.12), intensity * (heat_scale - 0.16),
+            )
 
-        # --- 3. ARMS (Crawl unchanged; Run uses rigid-bone counter-phase sprinter arm pump) ---
-        for arm_idx, phase_off, c_heat, r_heat in [(0, math.pi, 0.78, 0.75), (1, 0.0, 0.90, 0.88)]:
-            heat_scale = (1.0 - p) * c_heat + p * r_heat
-            th_c = phi_c + phase_off
-            # Crawl arm (100% unchanged)
-            ex_c = sh_c[0] + 1.2 + 3.2 * math.sin(th_c + 0.25)
-            ey_c = gy - 3.6 - 0.8 * max(0.0, math.cos(th_c))
-            hx_c = sh_c[0] + 2.8 + 5.2 * math.sin(th_c - 0.15)
-            hy_c = gy - 0.6 - 1.8 * max(0.0, math.cos(th_c + 0.25))
+        # --- 3. GROUND-LOCKED 2-BONE IK ARMS ---
+        for arm_idx, phase_off, heat_scale in [(0, 0.0, 0.74), (1, 0.5, 0.86)]:
+            # (a) Crawl Arm (Contralateral to leg: hand plants flat ahead of head & pulls torso over bent elbow!)
+            ph_c = cycle_c + phase_off
+            kc = math.floor(ph_c)
+            fc = ph_c - kc
+            hand_plant_w = start_x + 11.4 + (kc - phase_off) * crawl_stride_w
+            if fc < 0.56:
+                # Hand/forearm locked to ground pulling body forward
+                hwx = hand_plant_w
+                hwy = gy - 0.65
+            else:
+                # Forearm lifts gently and reaches forward past head to grip next patch of dirt
+                sc = (fc - 0.56) / 0.44
+                ssc = sc * sc * (3.0 - 2.0 * sc)
+                hwx = hand_plant_w + ssc * crawl_stride_w
+                hwy = gy - 0.65 - 1.8 * math.sin(math.pi * sc)
+            hand_c_rel = (dir_s * (hwx - world_x), hwy)
+            # bend_dir = -1 bends elbow DOWN/BACK toward ground (authentic human forearm army crawl!)
+            elb_c_rel = self._solve_2bone_ik(sh_c, hand_c_rel, 4.6, 4.6, bend_dir=-1.0)
+            elb_c_rel = (elb_c_rel[0], min(gy - 1.0, elb_c_rel[1]))
 
-            # Run arm: counter-phase polar arm swing
-            th_a = phi_r + phase_off + math.pi
-            a_up = 0.65 * math.sin(th_a) - 0.08
-            a_fo = a_up + 1.35
-            ex_r = sh_r[0] + 4.2 * math.sin(a_up)
-            ey_r = sh_r[1] + 4.2 * math.cos(a_up)
-            hx_r = ex_r + 3.9 * math.sin(a_fo)
-            hy_r = ey_r + 3.9 * math.cos(a_fo)
+            # (b) Run Arm (Athletic counter-phase arm drive clearly visible in front of chest & behind hip!)
+            th_a = 2.0 * math.pi * (cycle_r + phase_off + 0.42)
+            a_up = 0.78 * math.sin(th_a) - 0.14
+            a_fo = a_up + 1.42 + 0.18 * math.sin(th_a)
+            elb_r_rel = (sh_r[0] + 4.3 * math.sin(a_up), sh_r[1] + 4.3 * math.cos(a_up))
+            hand_r_rel = (elb_r_rel[0] + 3.8 * math.sin(a_fo), elb_r_rel[1] + 3.8 * math.cos(a_fo))
 
-            elb_rel = lerp2((ex_c, ey_c), (ex_r, ey_r), p)
-            hnd_rel = lerp2((hx_c, hy_c), (hx_r, hy_r), p)
-            hnd_rel = (hnd_rel[0] - 1.0 * kneel, hnd_rel[1] + 1.2 * kneel)
+            elb_rel = lerp2(elb_c_rel, elb_r_rel, p)
+            hnd_rel = lerp2(hand_c_rel, hand_r_rel, p)
+            if 0.0 < p < 1.0:
+                # Hands push down off ground/knee during rise
+                hnd_rel = (hnd_rel[0] - 0.8 * kneel, min(gy - 0.5, hnd_rel[1] + 2.2 * kneel))
+                elb_rel = self._solve_2bone_ik(sh_rel, hnd_rel, 4.4, 4.2, bend_dir=-1.0)
 
             elbow = to_canvas(*elb_rel)
             hand = to_canvas(*hnd_rel)
 
-            add_capsule(shoulder, elbow, 1.22 + 0.05 * p, intensity * heat_scale)
-            add_capsule(elbow, hand, 1.12, intensity * (heat_scale + 0.03))
+            add_tapered_capsule(
+                shoulder, elbow,
+                1.35 + 0.08 * p, 1.12,
+                intensity * heat_scale, intensity * (heat_scale - 0.04),
+            )
+            add_tapered_capsule(
+                elbow, hand,
+                1.10, 0.96,
+                intensity * (heat_scale - 0.03), intensity * min(0.95, heat_scale + 0.06),
+            )
 
-        # --- 4. TORSO, NECK & ROUND HUMAN HEAD ---
-        torso_r = 1.95 + 0.55 * p
-        add_capsule(hip, shoulder, torso_r, intensity * 0.92)
-        add_capsule(shoulder, neck, 1.35, intensity * 0.86)
-        head_rad2 = ((px_f - head[0]) / (2.15 + 0.25 * p)) ** 2 + ((py_f - head[1]) / (2.00 + 0.35 * p)) ** 2
-        np.maximum(patch, np.exp(-1.50 * head_rad2) * intensity, out=patch)
+        # --- 4. ANATOMICALLY TAPERED TORSO, NECK & WARM HUMAN HEAD ---
+        # Broad shoulders/chest tapering naturally to hips with realistic clothed LWIR gradient
+        add_tapered_capsule(
+            shoulder, hip,
+            2.45 + 0.35 * p, 2.05 + 0.25 * p,
+            intensity * 0.90, intensity * 0.83,
+        )
+        add_tapered_capsule(shoulder, neck, 1.45, 1.25, intensity * 0.90, intensity * 0.93)
+        head_rad2 = ((px_f - head[0]) / (2.15 + 0.15 * p)) ** 2 + ((py_f - head[1]) / (2.05 + 0.30 * p)) ** 2
+        np.maximum(patch, np.exp(-1.55 * head_rad2) * intensity, out=patch)
 
-        return patch
+        # Subtle LWIR microbolometer optical PSF blur (natural thermal falloff, zero jagged pixel edges)
+        return cv2.GaussianBlur(patch, (3, 3), 0.45)
 
     def _render_vehicle_patch(
         self, t: int, patch_w: int, patch_h: int, intensity: float, is_forward: bool
@@ -527,29 +679,21 @@ class ThermalPerimeterSimulator:
                     span = max(1, (anom.end_frame - anom.start_frame))
                     alpha = (t - anom.start_frame) / span
                     if anom.anomaly_type in ("crawler", "crawling_intruder"):
-                        # 3-Phase Velocity Profile:
-                        # Phase 1 (t <= 110): Slow pulsed low-crawl under left wire barrier (alpha -> 0.0..0.41)
-                        # Phase 2 (110 < t < 130): Stand-up transition past x=65 barrier post (alpha -> 0.41..0.47)
-                        # Phase 3 (t >= 130): Natural upright running pace toward facility (alpha -> 0.47..1.0)
-                        if t <= 110:
-                            u_c = max(0.0, (t - anom.start_frame) / max(1.0, 110.0 - anom.start_frame))
-                            surge = (0.30 / (2.0 * math.pi * 7.5)) * math.sin(2.0 * math.pi * 7.5 * u_c)
-                            alpha = 0.41 * np.clip(u_c - surge, 0.0, 1.0)
-                        elif t < 130:
-                            u_t = (t - 110.0) / 20.0
-                            alpha = 0.41 + 0.06 * (0.4 * u_t + 0.6 * (u_t * u_t))
-                        else:
-                            u_r = min(1.0, (t - 130.0) / max(1.0, anom.end_frame - 130.0))
-                            alpha = 0.47 + 0.53 * u_r
-                        alpha = float(np.clip(alpha, 0.0, 1.0))
-                    cx = (anom.start_pos[0] + alpha * (anom.end_pos[0] - anom.start_pos[0])) * w
-                    cy = (anom.start_pos[1] + alpha * (anom.end_pos[1] - anom.start_pos[1])) * h
+                        sx_w = anom.start_pos[0] * w
+                        ex_w = anom.end_pos[0] * w
+                        cx = self._crawler_world_x(t, anom.start_frame, anom.end_frame, sx_w, ex_w)
+                        cy = (anom.start_pos[1] + alpha * (anom.end_pos[1] - anom.start_pos[1])) * h
+                    else:
+                        cx = (anom.start_pos[0] + alpha * (anom.end_pos[0] - anom.start_pos[0])) * w
+                        cy = (anom.start_pos[1] + alpha * (anom.end_pos[1] - anom.start_pos[1])) * h
 
                     bw, bh = anom.size
-                    x0 = int(np.clip(cx - bw / 2.0, 0, w))
-                    x1 = int(np.clip(cx + bw / 2.0, 0, w))
-                    y0 = int(np.clip(cy - bh / 2.0, 0, h))
-                    y1 = int(np.clip(cy + bh / 2.0, 0, h))
+                    x0_raw = math.floor(cx - bw / 2.0)
+                    y0_raw = math.floor(cy - bh / 2.0)
+                    x0 = int(np.clip(x0_raw, 0, w))
+                    x1 = int(np.clip(x0_raw + bw, 0, w))
+                    y0 = int(np.clip(y0_raw, 0, h))
+                    y1 = int(np.clip(y0_raw + bh, 0, h))
 
                     if x1 > x0 and y1 > y0:
                         py, px = np.ogrid[: y1 - y0, : x1 - x0]
@@ -560,9 +704,9 @@ class ThermalPerimeterSimulator:
                         if anom.anomaly_type == "vehicle":
                             # --- Tactical Mechanized Patrol Vehicle (Humvee / Technical) ---
                             full_patch = self._render_vehicle_patch(t, bw, bh, anom.intensity, is_fwd)
-                            px0 = x0 - int(cx - bw / 2.0)
+                            px0 = x0 - x0_raw
                             px1 = px0 + (x1 - x0)
-                            py0 = y0 - int(cy - bh / 2.0)
+                            py0 = y0 - y0_raw
                             py1 = py0 + (y1 - y0)
                             heat_patch = full_patch[py0:py1, px0:px1]
 
@@ -570,11 +714,20 @@ class ThermalPerimeterSimulator:
                             frame_mask[y0:y1, x0:x1] = np.where(heat_patch >= 60.0, 1, 0)
 
                         elif anom.anomaly_type in ("crawler", "crawling_intruder"):
-                            # --- Tactical Prone Crawling Saboteur (Commando Low-Crawl) ---
-                            full_patch = self._render_crawler_patch(t, bw, bh, anom.intensity, is_fwd)
-                            px0 = x0 - int(cx - bw / 2.0)
+                            # --- Ground-Locked 2-Bone IK Crawling -> Stand-Up -> Running Saboteur ---
+                            frac_x = (cx - bw / 2.0) - x0_raw
+                            full_patch = self._render_crawler_patch(
+                                t, bw, bh, anom.intensity, is_fwd,
+                                world_x=cx,
+                                start_x=anom.start_pos[0] * w,
+                                end_x=anom.end_pos[0] * w,
+                                start_frame=anom.start_frame,
+                                end_frame=anom.end_frame,
+                                frac_x=frac_x,
+                            )
+                            px0 = x0 - x0_raw
                             px1 = px0 + (x1 - x0)
-                            py0 = y0 - int(cy - bh / 2.0)
+                            py0 = y0 - y0_raw
                             py1 = py0 + (y1 - y0)
                             heat_patch = full_patch[py0:py1, px0:px1]
 

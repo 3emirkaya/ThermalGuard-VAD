@@ -1,51 +1,113 @@
-# ThermalGuard-VAD 🛡️🎯
-### Unsupervised Thermal Video Anomaly Detection for Defense Perimeter Surveillance
-**End-to-End Real-Time Edge Engineering Solution for Tactical Defense & Border Security**
+<div align="center">
 
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)](https://pytorch.org/)
-[![TorchScript / ONNX](https://img.shields.io/badge/Deployment-Edge%20Ready-green.svg)](weights/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](LICENSE)
-[![Tests: Passing](https://img.shields.io/badge/Tests-PyTest%2013%2F13%20Passing-brightgreen.svg)](tests/)
+# ThermalGuard-VAD
 
----
+**Unsupervised Long-Wave Infrared (LWIR) Video Anomaly Detection for Defense Perimeter Surveillance**
 
-![ThermalGuard-VAD Tactical HUD Banner](demo_kaist_pedestrian.gif)
-> **Figure 1:** `ThermalGuard-VAD` Real-Time Tactical Dashboard (KAIST Benchmark Pedestrian Sector Crossing — Real LWIR Sensor Feed). **Top Panel:** Live scrolling Anomaly Score timeline with dynamic threshold line and alert state badge. **Bottom Left:** Preprocessed Long-Wave Infrared (LWIR) raw thermal feed. **Bottom Right:** Thermal fusion with spatial reconstruction error heatmap highlighting an unauthorized pedestrian breaching the security perimeter sector.
+*Real-time radiometric thermal preprocessing, Spatio-Temporal Autoencoder (STAE + ConvLSTM) inference, and a modern C2 web console engineered for edge deployment.*
 
----
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-18181b?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![Edge Ready](https://img.shields.io/badge/Deployment-TorchScript%20%2F%20ONNX-10b981?style=flat-square)](weights/)
+[![PyTest](https://img.shields.io/badge/Tests-13%2F13%20Passing-10b981?style=flat-square)](tests/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-f97316?style=flat-square)](LICENSE)
 
-![ThermalGuard-VAD Operational Field Thermal Benchmark](demo_field_thermal.gif)
-> **Figure 2:** `ThermalGuard-VAD` Live Operational Field Thermal Benchmark (Real 640×512 LWIR Sensor Feed). Real-time spatio-temporal anomaly localization, dynamic score elevation, and tactical intruder bounding-box tracking on an authentic thermal defense surveillance sequence.
+[Live Console](#tactical-web-console) &nbsp;&middot;&nbsp;
+[Live Benchmarks](#real-time-lwir-detection-benchmarks) &nbsp;&middot;&nbsp;
+[Quick Start](#quick-start) &nbsp;&middot;&nbsp;
+[Engineering Docs](#english-documentation) &nbsp;&middot;&nbsp;
+[Türkçe Dokümantasyon](#turkce-dokumantasyon)
 
----
-
-## 🌐 Language Navigation / Dil Seçimi
-- [English Version](#-english-version)
-  - [1. Defense Mission Profile & Thermal Physics Rationale](#1-defense-mission-profile--thermal-physics-rationale)
-  - [2. Why Standard RGB Models Fail on Infrared](#2-why-standard-rgb-models-fail-on-infrared)
-  - [3. Unsupervised Normality Learning Formulation](#3-unsupervised-normality-learning-formulation)
-  - [4. Thermal-Specific Preprocessing Pipeline](#4-thermal-specific-preprocessing-pipeline)
-  - [5. Spatio-Temporal Autoencoder (STAE) Architecture](#5-spatio-temporal-autoencoder-stae-architecture)
-  - [6. Anomaly Scoring & Spatial Localization Heatmap](#6-anomaly-scoring--spatial-localization-heatmap)
-  - [7. Empirical Benchmark & Ablation Study](#7-empirical-benchmark--ablation-study)
-  - [8. Tactical Web Command Center (C2 Dashboard)](#8-tactical-web-command-center-c2-dashboard)
-  - [9. Edge Deployment & Real-Time Telemetry](#9-edge-deployment--real-time-telemetry)
-  - [10. Repository Architecture](#10-repository-architecture)
-- [Türkçe Versiyon](#-türkçe-versiyon)
-  - [1. Savunma Sanayii Problem Tanımı ve Termal Fizik Motivasyonu](#1-savunma-sanayii-problem-tanımı-ve-termal-fizik-motivasyonu)
-  - [2. Standart RGB Modelleri Kızılötesinde Neden Çöker?](#2-standart-rgb-modelleri-kızılötesinde-neden-çöker)
-  - [3. Denetimsiz (Unsupervised) Normallik Öğrenme Yaklaşımı](#3-denetimsiz-unsupervised-normallik-öğrenme-yaklaşımı)
-  - [4. Termal Görüntülere Özel 5 Aşamalı Ön İşleme Hattı](#4-termal-görüntülere-özel-5-aşamalı-ön-işleme-hattı)
-  - [5. Model Mimarisi: Spatio-Temporal Autoencoder (STAE)](#5-model-mimarisi-spatio-temporal-autoencoder-stae)
-  - [6. Anomali Skorlama ve Isı Haritası (Heatmap) Mekaniği](#6-anomali-skorlama-ve-ısı-haritası-heatmap-mekaniği)
-  - [7. Deneysel Kıyaslama ve Saha Dayanıklılık Ablasyonu](#7-deneysel-kıyaslama-ve-saha-dayanıklılık-ablasyonu)
-  - [8. Taktik Komuta ve Denetim Web Paneli (C2 Arayüzü)](#8-taktik-komuta-ve-denetim-web-paneli-c2-arayüzü)
-  - [9. Kenar Cihaz Performansı ve Sayısal Doğrulama](#9-kenar-cihaz-performansı-ve-sayısal-doğrulama)
+</div>
 
 ---
 
-# 🇬🇧 English Version
+<a id="tactical-web-console"></a>
+## Tactical Web Console (`app.py`)
+
+![ThermalGuard-VAD Live Command Console](docs/dashboard_live.png)
+
+> **Live Perimeter Surveillance Console:** Single-click scenario switcher (`Real LWIR` & `Simulation`), multi-source input support (KAIST sequences, RTSP IP thermal cameras, USB webcams, or custom uploads), **960×810 HD dual-feed LWIR HUD** (White-Hot raw input + Inferno fusion & tracking bounding box), live **Instantaneous Anomaly Score** meter, and automated real-time **Incident Stream**.
+
+---
+
+<a id="real-time-lwir-detection-benchmarks"></a>
+## Real-Time LWIR Detection Benchmarks
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="demo_kaist_pedestrian.gif" alt="KAIST Pedestrian Sector Crossing" width="100%" /><br/>
+      <strong>KAIST Pedestrian Sector Crossing</strong><br/>
+      <sub>Real LWIR thermal sensor sequence &mdash; spatial anomaly localization &amp; tracking</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="demo_field_thermal.gif" alt="Operational Field Corridor Benchmark" width="100%" /><br/>
+      <strong>Operational Field Corridor (640&times;512 LWIR)</strong><br/>
+      <sub>Live dynamic score elevation &amp; perimeter intruder bounding-box detection</sub>
+    </td>
+  </tr>
+</table>
+
+### Integrated Security Audit & Incident Forensics
+
+![ThermalGuard-VAD Security Audit Report](docs/incident_report.png)
+
+> **Built-in Live Audit Log:** Located directly below the surveillance viewport, automatically capturing frame ranges, intrusion duration, peak anomaly scores, target classifications (`Human` / `Vehicle` / `Crawler`), and offline or LLM-generated tactical threat assessments (Rule-Based, Ollama, OpenAI GPT, Google Gemini) with one-click **PDF Export**.
+
+---
+
+<a id="quick-start"></a>
+## Quick Start
+
+```bash
+git clone https://github.com/3emirkaya/ThermalGuard-VAD.git
+cd ThermalGuard-VAD
+pip install -r requirements.txt
+
+# Launch the Web Command Console -> http://localhost:5000
+python app.py
+```
+
+| Workflow | Command | Description |
+| :--- | :--- | :--- |
+| **Web Console** | `python app.py` | Launches the Obsidian/Alabaster live monitoring & audit dashboard at `localhost:5000` |
+| **Unit Tests** | `pytest` | Runs all 13 preprocessing, model architecture, and streaming engine tests |
+| **Model Training** | `python scripts/train.py --config configs/default.yaml` | Trains the unsupervised STAE + ConvLSTM model on normal LWIR clips |
+| **Ablation Benchmark** | `python scripts/benchmark.py` | Evaluates AUROC, PR-AUC, Pixel-AUC, and sensor noise robustness |
+| **Edge Export** | `python scripts/export_onnx.py` | Exports verified TorchScript & ONNX runtimes with exact bitwise parity |
+
+### Core Capabilities at a Glance
+
+| Layer | Engineering Highlights |
+| :--- | :--- |
+| **Thermal Preprocessing** | Deterministic 5-stage LWIR pipeline: Percentile AGC + EMA &rarr; Dead/Hot Pixel Repair &rarr; Column FPN Destriping &rarr; Bilateral Denoising &rarr; CLAHE |
+| **Anomaly Backbone** | Unsupervised 2D CNN Encoder &rarr; Fused-Gate GroupNorm ConvLSTM Bottleneck (75% compression, zero skip connections) &rarr; Bilinear 2D Decoder |
+| **Scoring & Tracking** | Top-K (99.5th percentile) spatial aggregation + causal EMA smoothing + morphological contour fusion for cohesive target bounding boxes |
+| **Tactical Simulator** | Physics-based LWIR generator with 3 environments (`outpost` vehicle breach, `facility` 2-Bone IK crawl-to-sprint saboteur, `perimeter` wire crossing) |
+| **Edge Readiness** | 588K parameters (~4.60 MB), **44.6 FPS** on CPU / **160+ FPS** on NVIDIA Jetson, $< 15\text{ MB}$ rolling streaming RAM |
+
+---
+
+## Navigation
+
+* **English Technical Documentation**
+  * [1. Defense Mission Profile & Thermal Physics Rationale](#1-defense-mission-profile--thermal-physics-rationale)
+  * [2. Why Standard RGB Models Fail on Infrared](#2-why-standard-rgb-models-fail-on-infrared)
+  * [3. Unsupervised Normality Learning Formulation](#3-unsupervised-normality-learning-formulation)
+  * [4. Thermal-Specific Preprocessing Pipeline](#4-thermal-specific-preprocessing-pipeline)
+  * [5. Spatio-Temporal Autoencoder (STAE) Architecture](#5-spatio-temporal-autoencoder-stae-architecture)
+  * [6. Anomaly Scoring & Spatial Localization Heatmap](#6-anomaly-scoring--spatial-localization-heatmap)
+  * [7. Empirical Benchmark & Ablation Study](#7-empirical-benchmark--ablation-study)
+  * [8. Edge Deployment & Real-Time Telemetry](#8-edge-deployment--real-time-telemetry)
+  * [9. Repository Architecture](#9-repository-architecture)
+* **Türkçe Teknik Dokümantasyon**
+  * [Türkçe Versiyon](#turkce-dokumantasyon)
+
+---
+
+<a id="english-documentation"></a>
+# English Technical Documentation
 
 ## 1. Defense Mission Profile & Thermal Physics Rationale
 
@@ -56,7 +118,7 @@ However, operational field conditions introduce severe physical challenges:
 2. **Thermal Crossover Phenomenon:** During dawn and dusk, the radiant temperature of ambient terrain (soil, rocks, vegetation) transitions across the ambient temperature of human targets or vehicle signatures. The differential radiant temperature drops near zero ($\Delta T \to 0$), collapsing global dynamic range and causing targets to vanish against the background.
 3. **Sensor-Level Defect Characteristics:**
    * **Fixed Pattern Noise (FPN):** Microbolometer Focal Plane Arrays (FPAs) suffer from spatial non-uniformity across readout columns, producing persistent vertical and horizontal striping artifacts.
-   * **Noise Equivalent Temperature Difference (NETD):** Tactical tactical microbolometers display temporal high-frequency noise (~40–60 mK), which easily overwhelms weak intruder signatures.
+   * **Noise Equivalent Temperature Difference (NETD):** Tactical microbolometers display temporal high-frequency noise (~40–60 mK), which easily overwhelms weak intruder signatures.
    * **Dead / Hot Pixels:** Defective detector elements generate impulse salt-and-pepper noise spikes.
 
 `ThermalGuard-VAD` is engineered to resolve these constraints through physics-aware thermal preprocessing coupled with a spatio-temporal deep neural architecture.
@@ -172,9 +234,9 @@ In border surveillance, an intruder occupies only 1% to 3% of the image frame. I
 $$\mathcal{S}_{\text{frame}} = \text{Percentile}_{99.5}\left( (x - \hat{x})^2 \right)$$
 Combined with a causal Exponential Moving Average (EMA, $\alpha=0.6$) across consecutive frames, this eliminates transient single-frame sensor noise while maintaining immediate sensitivity to perimeter breaches.
 
-### Dual-Panel Tactical HUD Visualization (`demo_kaist_pedestrian.gif`)
-* **Upper Panel:** Live scrolling graph rendering anomaly score vs. frame index. Displays a horizontal red dashed threshold line (`Threshold = 0.20`), green/red status badges, and hardware latency telemetrics.
-* **Lower Panel:** Split display showing preprocessed LWIR input alongside the spatial error heatmap (blended via OpenCV `COLORMAP_INFERNO`), painting anomalous perimeter breaches in radiant amber/yellow with tactical tracking box.
+### High-DPI Dual-Panel Tactical HUD (`960×810`)
+* **Upper Panel:** Live scrolling graph rendering anomaly score vs. frame index with dashed threshold line (`Threshold = 0.20`) and alert status readout.
+* **Lower Panel:** Split display showing preprocessed LWIR input alongside the Inferno false-color thermal fusion with morphological contour merging and tactical corner-bracket target tracking.
 
 ---
 
@@ -190,47 +252,36 @@ Evaluated under controlled baseline and severe field degradation conditions (sim
 | **A*: Raw + Field Sensor Degradation** | 0.4602 | 0.5121 | 0.1703 | 0.043 | 6.28 | 20.7 ms | 48.2 FPS |
 | **C*: ThermalGuard + Field Degradation** | **Preserved** | — | **0.7829** | 0.177 | Suppressed | 22.9 ms | **43.7 FPS** |
 
-### Key Findings for Defense Evaluators:
+### Key Findings for Defense Evaluators
 1. **Localization Failure of Raw RGB Normalization:** While Pipeline A achieves acceptable whole-frame detection on clean test clips, its Pixel-AUC is near chance (0.5423), failing to localize where the intruder is in the image.
 2. **Catastrophic Failure under Field Noise:** When subjected to realistic field degradation (Pipeline A*), raw processing collapses completely (AUROC 0.4602).
-3. **Robustness of ThermalGuard (Pipeline C):** Incorporating destriping and bilateral filtering prior to CLAHE preserves spatial anomaly localization (**Pixel-AUC 0.9190**) while maintaining real-time edge throughput (**44.6 FPS** on standard CPU, **180+ FPS** on embedded GPU).
+3. **Robustness of ThermalGuard (Pipeline C):** Incorporating destriping and bilateral filtering prior to CLAHE preserves spatial anomaly localization (**Pixel-AUC 0.9190**) while maintaining real-time edge throughput (**44.6 FPS** on standard CPU, **160+ FPS** on embedded GPU).
 
 ---
 
-## 8. Tactical Web Command Center (C2 Dashboard)
+## 8. Edge Deployment & Real-Time Telemetry
 
-`ThermalGuard-VAD` includes a production-grade tactical web console (`app.py`) for live perimeter operations, operator telemetry, and automated security audit reporting.
-
-![ThermalGuard-VAD Live Monitoring Dashboard](docs/dashboard_live.png)
-> **Figure 3:** Live Perimeter Monitoring & Tactical Control Deck. **Top Control Bar:** Multi-source selector (KAIST benchmark, operational field thermal cameras, RTSP IP streams, or file uploads), pause/resume controls, and telemetry gauges. **Left Stream:** Dual-window display showing calibrated raw LWIR thermal input alongside real-time anomaly heatmaps with bounding-box intruder tracking (`CYCLIST [ALERT]`). **Right Deck:** Real-time processing metrics (21.4 FPS CPU throughput, 45.4 ms latency) and timestamped event notifications with LLM situational assessments.
-
-![ThermalGuard-VAD Incident & Audit Report](docs/incident_report.png)
-> **Figure 4:** Integrated Security Audit & Incident Forensics Deck (Located at the bottom of the dashboard). Operators receive automated perimeter breach audits with exact frame ranges, intrusion durations, peak anomaly scores, classification tags (`Vehicle` / `Human`), and high-level LLM defense summaries exportable to PDF.
-
----
-
-## 9. Edge Deployment & Real-Time Telemetry
-
-The architecture is fully verified for embedded deployment on edge platforms (NVIDIA Jetson AGX Orin, Xavier NX, and x86 edge servers):
+The architecture is verified for embedded deployment on edge platforms (NVIDIA Jetson AGX Orin, Xavier NX, and x86 edge servers):
 
 * **Model Footprint:** 588,000 float32 parameters (~4.60 MB total storage).
-* **TorchScript & ONNX Export:** Fully trace-able into standalone TorchScript (`weights/stae_thermal_traced.pt`) and ONNX graph structures.
+* **TorchScript & ONNX Export:** Traceable into standalone TorchScript (`weights/stae_thermal_traced.pt`) and ONNX graph structures.
 * **Numerical Equivalence:** Maximal absolute discrepancy between PyTorch and deployed runtime outputs: $|y_{\text{pytorch}} - y_{\text{deploy}}| = 0.000000 \times 10^0$ (exact bitwise parity).
 * **Streaming Memory Guarantee:** Rolling frame buffer consumes $< 15\text{ MB}$ of system RAM during uninterrupted 24/7 video processing.
 
 ---
 
-## 10. Repository Architecture
+## 9. Repository Architecture
 
 ```
 ThermalGuard-VAD/
+├── app.py                      # Obsidian/Alabaster live C2 web console & audit reporting server
 ├── configs/
 │   ├── default.yaml            # High-fidelity surveillance configuration
 │   └── edge_jetson.yaml        # Lightweight profile optimized for NVIDIA Jetson (<15ms)
 ├── data/                       # Dataset caching & KAIST benchmark sequences
-├── docs/                       # High-resolution dashboard & incident audit screenshots
-│   ├── dashboard_live.png      # Tactical live perimeter command center
-│   └── incident_report.png     # Automated security incident forensics & audit log
+├── docs/                       # High-resolution web console & audit report screenshots
+│   ├── dashboard_live.png      # Live perimeter command center (Obsidian UI)
+│   └── incident_report.png     # Integrated security audit & LLM threat report
 ├── scripts/
 │   ├── benchmark.py            # Systematic defense ablation & noise robustness evaluator
 │   ├── download_kaist.py       # Stdlib-only KAIST LWIR thermal channel downloader
@@ -242,20 +293,22 @@ ThermalGuard-VAD/
 │   ├── test_models.py          # ConvLSTM and STAE tensor dimension & loss unit tests
 │   └── test_preprocessing.py   # Radiometric AGC, CLAHE, FPN, and noise filter unit tests
 ├── thermalguard/
-│   ├── data/                   # Data sources, KAIST parser, and physical perimeter simulator
+│   ├── data/                   # Data sources, KAIST parser, and physics-based 2-Bone IK simulator
 │   ├── engine/                 # Streaming inference, anomaly scoring, and metric evaluation
 │   ├── models/                 # Spatio-Temporal Autoencoder & Fused ConvLSTM
 │   ├── preprocessing/          # 5-stage thermal pipeline (AGC, FPN, Bilateral, CLAHE)
-│   └── visualization/          # Real-time dashboard renderer & GIF/MP4 export
-├── demo_kaist_pedestrian.gif   # Tactical evaluation video output (KAIST Pedestrian Crossing)
-├── demo_field_thermal.gif      # Operational field corridor benchmark video output
+│   ├── reporting/              # Event logger & multi-backend LLM tactical summarizer
+│   └── visualization/          # High-DPI 960×810 HUD renderer & GIF/MP4 exporter
+├── demo_kaist_pedestrian.gif   # Real LWIR benchmark animation (KAIST Pedestrian Crossing)
+├── demo_field_thermal.gif      # Operational field corridor benchmark animation
 ├── requirements.txt            # Python dependencies
 └── pyproject.toml              # Build system, metadata & pytest pythonpath
 ```
 
 ---
 
-# 🇹🇷 Türkçe Versiyon
+<a id="turkce-dokumantasyon"></a>
+# Türkçe Teknik Dokümantasyon
 
 ## 1. Savunma Sanayii Problem Tanımı ve Termal Fizik Motivasyonu
 
@@ -284,9 +337,9 @@ Ancak sahada karşılaşılan fiziksel kısıtlar standart modelleri çaresiz b�
 
 ## 3. Denetimsiz (Unsupervised) Normallik Öğrenme Yaklaşımı
 
-Sınır güvenliğinde "anomali" (gece saatinde tel örgüye sızan terörist unsur, şüpheli el yapımı patlayıcı / termal ısı kaynağı, beklenmeyen insansız kara aracı) 10.000 saatte belki 1 kez gerçekleşir. Her senaryo için önceden milyonlarca etiketli veri toplamak imkansızdır.
+Sınır güvenliğinde "anomali" (gece saatinde tel örgüye sızan unsur, şüpheli ısı kaynağı, yetkisiz araç geçişi) 10.000 saatte belki 1 kez gerçekleşir. Her senaryo için önceden milyonlarca etiketli veri toplamak mümkün değildir.
 
-`ThermalGuard-VAD`, sadece **normal devriye / rutin durum videolarıyla** eğitilir:
+`ThermalGuard-VAD`, yalnızca **normal devriye / rutin durum videolarıyla** eğitilir:
 * **Eğitim Aşaması:** Model yalnızca normal sekansların zamansal ve uzamsal dinamiklerini öğrenir.
 * **Çıkarım Aşaması:** Normal arazide rekonstrüksiyon hatası düşük kalırken; anormal bir hedef (sızan insan veya araç) girdiğinde ağ bunu yeniden üretemez ve rekonstrüksiyon hatası (MSE / SSIM) aniden fırlar.
 
@@ -303,7 +356,7 @@ Ham Termal Kare (8/16-bit)
        │
        ▼
  2. Ölü / Sıcak Piksel Düzeltme (Impulse Noise Removal)
-    • 3x3 yerel medyan farkına göre sensör kusurlarını kenarları bozmadan temizler
+    • 3×3 yerel medyan farkına göre sensör kusurlarını kenarları bozmadan temizler
        │
        ▼
  3. Sabit Desen Gürültüsü / Sütun Çizgisi Giderme (FPN Destriping)
@@ -315,7 +368,7 @@ Ham Termal Kare (8/16-bit)
        │
        ▼
  5. CLAHE (Contrast Limited Adaptive Histogram Equalization)
-    • Gürültü temizlendikten SONRA yerel bloklarda (8x8) kontrastı dengeler
+    • Gürültü temizlendikten SONRA yerel bloklarda (8×8) kontrastı dengeler
        │
        ▼
  Model Giriş Tensörü ∈ [0.0, 1.0] (128 × 160)
@@ -325,46 +378,10 @@ Ham Termal Kare (8/16-bit)
 
 ---
 
-## 5. Model Mimarisi: Spatio-Temporal Autoencoder (STAE)
+## 5. Model Mimarisi, Skorlama ve Saha Performansı
 
-* **Encoder:** 4 konvolüsyonel blok (16 → 32 → 64 → 96 kanal), zaman boyunca ağırlık paylaşımlı.
-* **Darboğaz (Bottleneck):** Çift katmanlı Fused ConvLSTM (GroupNorm stabilizasyonlu), %75 sıkıştırma oranı.
-* **Decoder:** Bilinear upsampling + 2D CNN katmanları (96 → 64 → 32 → 16 kanal).
-* **Neden Skip Connection Yok?:** Skip connection kullanılırsa anomali doğrudan çıkışa kopyalanır ve hata skoru sıfırlanır. Bilginin sıkıştırılmış ConvLSTM darboğazından geçmesi zorunludur.
+* **STAE + Fused ConvLSTM:** 4 bloklu ağırlık paylaşımlı 2D CNN Encoder (16 → 32 → 64 → 96), çift katmanlı GroupNorm ConvLSTM darboğazı (%75 sıkıştırma, skip connection kesinlikle yasak) ve 2D CNN Decoder.
 * **Hibrit Kayıp:** $\mathcal{L}(x, \hat{x}) = \text{MSE}(x, \hat{x}) + 0.2 \cdot (1 - \text{SSIM}(x, \hat{x}))$.
-
----
-
-## 6. Anomali Skorlama ve Isı Haritası (Heatmap) Mekaniği
-
-* **Top-K / 99.5 Persentil Havuzlama:** Sızan bir insan karenin yalnızca %1-%3'ünü kaplar. Basit ortalama MSE alınırsa normal arka plan anomaliyi boğar. Bu yüzden piksellerin en yüksek hatalı %0.5'lik kısmının persentili alınır.
-* **Taktik HUD Paneli (`demo_kaist_pedestrian.gif`):**
-  * Üst panelde gerçek zamanlı akan Anomali Skoru grafiği ve kırmızı alarm eşik çizgisi (`Threshold = 0.20`).
-  * Alt panelde termal akış üzerinde anomali bölgesini vurgulayan Inferno sahte renk paleti ve hedef takip kutusu.
-
----
-
-## 7. Deneysel Kıyaslama ve Saha Dayanıklılık Ablasyonu
-
-* **Ham Normalizasyon:** Temiz videolarda kare tespiti yapsa da **Piksel Lokalizasyon AUC değeri sadece 0.5423** kalmış (hedefin yerini bulamamış), saha gürültüsü altında ise **0.4602** değerine çökmüştür.
-* **ThermalGuard Tam Hat:** **0.9874 AUROC**, **0.9873 PR-AUC** ve **0.9190 Piksel Lokalizasyon AUC** değerine ulaşarak hedefin yerini net olarak izole etmiştir.
-
----
-
-## 8. Taktik Komuta ve Denetim Web Paneli (C2 Arayüzü)
-
-`ThermalGuard-VAD`, saha operatörlerinin anlık çevre güvenliğini takip edebilmesi, eşik değerlerini ayarlayabilmesi ve adli güvenlik raporları üretebilmesi için tam teşekküllü bir taktik web arayüzüne (`app.py`) sahiptir.
-
-![ThermalGuard-VAD Canlı İzleme Konsolu](docs/dashboard_live.png)
-> **Şekil 3:** Canlı Çevre Gözetleme ve Taktik Kontrol Paneli. **Üst Kontrol Barı:** Çoklu kaynak seçici (KAIST veri seti sekansları, operasyonel saha termal kameraları, RTSP IP canlı akışları veya özel video yükleme), durdur/devam et kontrolleri ve durum göstergeleri. **Sol Akış:** Ham LWIR beyaz-sıcak termal görüntü ile gerçek zamanlı anomali rekonstrüksiyon ısı haritasının (`CYCLIST [ALERT]`) yan yana izlenmesi. **Sağ Panel:** Anlık sistem metrikleri (21.4 FPS CPU hızı, 45.4 ms gecikme) ve zaman damgalı LLM durum değerlendirmeleri.
-
-![ThermalGuard-VAD Olay ve Teftiş Raporu](docs/incident_report.png)
-> **Şekil 4:** Entegre Güvenlik Olayı Teftiş ve Adli Bilişim Raporu (Ana sayfanın alt kısmında yer alır). İhlal gerçekleştiğinde kare aralıkları, ihlal süresi, tepe anomali skoru, hedef tipi (`Araç` / `İnsan`) ve LLM tarafından üretilen askeri durum özeti otomatik olarak listelenir ve PDF olarak dışa aktarılabilir.
-
----
-
-## 9. Kenar Cihaz Performansı ve Sayısal Doğrulama
-
-* **Parametre Sayısı:** 588.000 float32 (~4.60 MB).
-* **Hız:** Standart x86 CPU üzerinde **44.6 FPS**, gömülü platformlarda (Jetson Orin/Xavier) **160+ FPS**.
-* **Sayısal Eşdeğerlik:** PyTorch modeli ile derlenen TorchScript (`stae_thermal_traced.pt`) çıktısı arasındaki mutlak fark: **0.000000e+00** (birebir tam eşleşme).
+* **Top-K / %99.5 Persentil Skorlama:** Karenin yalnızca %1–3'ünü kaplayan hedeflerin arka plan içinde kaybolmasını önler.
+* **Deneysel Başarım:** Ham normalizasyonda **0.5423** kalan Piksel Lokalizasyon AUC değeri, ThermalGuard tam hattıyla **0.9190** seviyesine, Frame AUROC ise **0.9874** değerine ulaşmıştır.
+* **Kenar Cihaz Performansı:** 588.000 parametre (~4.60 MB), standart CPU üzerinde **44.6 FPS**, gömülü GPU (NVIDIA Jetson) üzerinde **160+ FPS**, PyTorch–TorchScript sayısal farkı **0.000000e+00**.

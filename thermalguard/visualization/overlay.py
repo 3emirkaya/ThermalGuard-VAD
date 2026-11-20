@@ -59,84 +59,100 @@ class DashboardVisualizer:
         h: int,
     ) -> np.ndarray:
         """
-        Top panel: OpenCV-optimized scrolling time-series anomaly score graph.
+        Top panel: High-DPI OpenCV scrolling time-series anomaly score graph.
+        Scales proportionally with output resolution for crisp rendering on wide viewports.
         """
-        graph = np.full((h, w, 3), 22, dtype=np.uint8)  # Dark tactical slate background
+        sf = w / 640.0
+        graph = np.full((h, w, 3), (20, 17, 17), dtype=np.uint8)  # Deep obsidian slate (BGR)
 
-        # Margins and plot dimensions
-        pad_l, pad_r, pad_t, pad_b = 60, 20, 30, 25
-        plot_w = w - pad_l - pad_r
-        plot_h = h - pad_t - pad_b
+        # Margins and plot dimensions scaled cleanly
+        pad_l = int(round(60 * sf))
+        pad_r = int(round(20 * sf))
+        pad_t = int(round(32 * sf))
+        pad_b = int(round(22 * sf))
+        plot_w = max(10, w - pad_l - pad_r)
+        plot_h = max(10, h - pad_t - pad_b)
 
         # Plot background canvas
-        cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (32, 35, 40), -1)
-        cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (65, 75, 85), 1)
+        cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (28, 25, 25), -1)
+        cv2.rectangle(graph, (pad_l, pad_t), (pad_l + plot_w, pad_t + plot_h), (62, 62, 68), max(1, int(round(sf))))
 
         # Y-axis scaling (0.0 to at least 0.8 or max_score * 1.25)
         max_y = max(0.8, self.threshold * 1.8, max(self.scores) * 1.25 if self.scores else 0.8)
 
         # Y-axis grid lines and labels
+        grid_font = 0.36 * sf
+        tick_thick = max(1, int(round(1.1 * sf)))
         for val in [0.2, 0.4, 0.6, 0.8]:
             if val < max_y:
                 y_px = int(pad_t + plot_h * (1.0 - val / max_y))
-                cv2.line(graph, (pad_l, y_px), (pad_l + plot_w, y_px), (45, 50, 58), 1, cv2.LINE_AA)
-                cv2.putText(graph, f"{val:.1f}", (pad_l - 42, y_px + 4),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (140, 150, 160), 1, cv2.LINE_AA)
+                cv2.line(graph, (pad_l, y_px), (pad_l + plot_w, y_px), (42, 42, 48), 1, cv2.LINE_AA)
+                cv2.putText(graph, f"{val:.1f}", (pad_l - int(round(40 * sf)), y_px + int(round(4 * sf))),
+                            cv2.FONT_HERSHEY_SIMPLEX, grid_font, (150, 155, 165), tick_thick, cv2.LINE_AA)
 
         # Threshold reference line
         thresh_y = int(pad_t + plot_h * (1.0 - self.threshold / max_y))
         if pad_t <= thresh_y <= pad_t + plot_h:
-            dash_w = 8
+            dash_w = max(4, int(round(8 * sf)))
+            t_thick = max(1, int(round(1.6 * sf)))
             for x in range(pad_l, pad_l + plot_w, dash_w * 2):
                 cv2.line(graph, (x, thresh_y), (min(x + dash_w, pad_l + plot_w), thresh_y),
-                         (60, 70, 240), 2, cv2.LINE_AA)
+                         (68, 68, 239), t_thick, cv2.LINE_AA)
             cv2.putText(graph, f"THRESHOLD: {self.threshold:.2f}",
-                        (pad_l + plot_w - 140, thresh_y - 6),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (80, 90, 245), 1, cv2.LINE_AA)
+                        (pad_l + plot_w - int(round(138 * sf)), thresh_y - int(round(7 * sf))),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.37 * sf, (92, 92, 245), tick_thick, cv2.LINE_AA)
 
         # Plot scrolling score trajectory
         if len(self.scores) >= 2:
-            n_pts = len(self.scores)
             pts = []
             for i, sc in enumerate(self.scores):
                 x_px = int(pad_l + (i / max(1, self.history_len - 1)) * plot_w)
                 y_px = int(pad_t + plot_h * (1.0 - np.clip(sc, 0.0, max_y) / max_y))
                 pts.append((x_px, y_px))
 
+            norm_thick = max(2, int(round(2.0 * sf)))
+            anom_thick = max(2, int(round(2.8 * sf)))
             for i in range(len(pts) - 1):
                 p1, p2 = pts[i], pts[i + 1]
                 val = self.scores[i + 1]
-                # Electric alert red or bright neon green
-                color = (40, 50, 245) if val >= self.threshold else (40, 240, 50)
-                thickness = 2 if val < self.threshold else 3
+                color = (68, 68, 245) if val >= self.threshold else (129, 185, 16)
+                thickness = norm_thick if val < self.threshold else anom_thick
                 cv2.line(graph, p1, p2, color, thickness, cv2.LINE_AA)
 
             last_pt = pts[-1]
-            cv2.circle(graph, last_pt, 4,
-                       (40, 50, 255) if current_score >= self.threshold else (40, 255, 60), -1)
+            cv2.circle(graph, last_pt, max(3, int(round(4 * sf))),
+                       (68, 68, 255) if current_score >= self.threshold else (140, 210, 35), -1, cv2.LINE_AA)
 
-        # Graph Header and Status Value (No overlap coordinates)
+        # Graph Header and Status Value (Crisp scaled typography, zero overlap)
         is_alert = current_score >= self.threshold
         status_text = "ANOMALY DETECTED [ALARM]" if is_alert else "PERIMETER SECURE"
-        status_color = (40, 60, 255) if is_alert else (40, 245, 60)
+        status_color = (72, 72, 250) if is_alert else (129, 185, 16)
+        hdr_y = int(round(21 * sf))
+        hdr_font = 0.41 * sf
+        hdr_thick = max(1, int(round(1.15 * sf)))
 
-        cv2.putText(graph, "ANOMALY SCORE STREAM", (pad_l, 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (200, 210, 220), 1, cv2.LINE_AA)
+        cv2.putText(graph, "ANOMALY SCORE STREAM", (pad_l, hdr_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, hdr_font, (212, 212, 216), hdr_thick, cv2.LINE_AA)
 
-        cv2.putText(graph, f"SCORE: {current_score:.4f}", (pad_l + 230, 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, status_color, 1, cv2.LINE_AA)
+        cv2.putText(graph, f"SCORE: {current_score:.4f}", (pad_l + int(round(225 * sf)), hdr_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, hdr_font, status_color, hdr_thick, cv2.LINE_AA)
 
-        cv2.putText(graph, f"[{status_text}]", (pad_l + plot_w - 200, 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, status_color, 1, cv2.LINE_AA)
+        status_str = f"[{status_text}]"
+        (tw, _), _ = cv2.getTextSize(status_str, cv2.FONT_HERSHEY_SIMPLEX, hdr_font, hdr_thick)
+        cv2.putText(graph, status_str, (pad_l + plot_w - tw, hdr_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, hdr_font, status_color, hdr_thick, cv2.LINE_AA)
 
         return graph
 
     def render_frame(self, result: InferenceResult) -> np.ndarray:
         """
-        Render combined HUD frame: score chart on top, dual thermal view on bottom, telemetry bar.
+        Render high-resolution combined HUD frame: score chart on top, dual thermal view on bottom, telemetry bar.
         """
         self.scores.append(result.anomaly_score)
         self.timestamps.append(result.frame_idx)
+
+        sf = self.width / 640.0
+        hud_bar_h = max(24, int(round(36 * sf)))
 
         # 1. Top Panel: Graph
         graph_panel = self._render_score_graph(
@@ -148,36 +164,39 @@ class DashboardVisualizer:
 
         # 2. Bottom Panel: Video & Heatmap
         sub_w = self.width // 2
-        sub_h = self.video_height - 35
+        sub_h = max(32, self.video_height - hud_bar_h)
+        lbl_font = 0.38 * sf
+        lbl_x = int(round(12 * sf))
+        lbl_y = int(round(22 * sf))
+        lbl_thick = max(1, int(round(1.1 * sf)))
+        stroke_thick = max(2, int(round(2.8 * sf)))
 
-        # Left: Preprocessed Thermal Input (White-Hot Grayscale)
+        # Left: Preprocessed Thermal Input (White-Hot Grayscale) — INTER_CUBIC for sharper edges
         left_u8 = (result.preprocessed * 255.0).astype(np.uint8)
         left_bgr = cv2.cvtColor(left_u8, cv2.COLOR_GRAY2BGR)
-        left_resized = cv2.resize(left_bgr, (sub_w, sub_h), interpolation=cv2.INTER_LINEAR)
-        # Black stroke + crisp white text for high contrast on any background
-        cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 2, cv2.LINE_AA)
-        cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (10, 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, (240, 240, 240), 1, cv2.LINE_AA)
+        left_resized = cv2.resize(left_bgr, (sub_w, sub_h), interpolation=cv2.INTER_CUBIC)
+        cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (lbl_x, lbl_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (0, 0, 0), stroke_thick, cv2.LINE_AA)
+        cv2.putText(left_resized, "LWIR THERMAL INPUT (WHITE-HOT RAW)", (lbl_x, lbl_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (240, 240, 244), lbl_thick, cv2.LINE_AA)
 
         # Right: Authentic Thermal False-Color (Ironbow / Inferno Palette)
         thermal_color = cv2.applyColorMap(left_u8, cv2.COLORMAP_INFERNO)
-        right_resized = cv2.resize(thermal_color, (sub_w, sub_h), interpolation=cv2.INTER_LINEAR)
+        right_resized = cv2.resize(thermal_color, (sub_w, sub_h), interpolation=cv2.INTER_CUBIC)
 
         if result.is_anomaly:
-            cv2.rectangle(right_resized, (0, 0), (sub_w - 1, sub_h - 1), (30, 40, 245), 3)
-            # High-visibility tactical yellow with black stroke shadow
-            cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 3, cv2.LINE_AA)
-            cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (40, 220, 255), 1, cv2.LINE_AA)
+            border_t = max(2, int(round(3 * sf)))
+            cv2.rectangle(right_resized, (0, 0), (sub_w - 1, sub_h - 1), (45, 55, 245), border_t)
+            cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (lbl_x, lbl_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (0, 0, 0), stroke_thick + 1, cv2.LINE_AA)
+            cv2.putText(right_resized, "! ANOMALOUS TARGET DETECTED !", (lbl_x, lbl_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (50, 220, 255), lbl_thick, cv2.LINE_AA)
 
             # Detect target blob and draw tactical bounding box on primary intruder
             if getattr(result, "error_map", None) is not None:
                 err = result.error_map
                 p_thresh = max(float(np.percentile(err, 98.2)), 0.08)
                 blob_mask = (err >= p_thresh).astype(np.uint8)
-                # Morphological close bridges vehicle wheels, engine, and human limbs into a single coherent entity
                 blob_mask = cv2.morphologyEx(blob_mask, cv2.MORPH_CLOSE, np.ones((11, 15), np.uint8))
                 contours, _ = cv2.findContours(blob_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -186,16 +205,13 @@ class DashboardVisualizer:
 
                 valid_cnts = [c for c in contours if cv2.contourArea(c) >= 12]
                 if valid_cnts:
-                    # Pick largest contour or merge contiguous target blobs
                     main_cnt = max(valid_cnts, key=cv2.contourArea)
                     bx, by, bw, bh = cv2.boundingRect(main_cnt)
 
-                    # Merge any nearby contours (e.g. trailing exhaust plume, wheel, or sprinting legs)
                     for other_c in valid_cnts:
                         if other_c is main_cnt:
                             continue
                         ox, oy, ow, oh = cv2.boundingRect(other_c)
-                        # Check horizontal and vertical proximity
                         if abs((ox + ow // 2) - (bx + bw // 2)) < 40 and abs((oy + oh // 2) - (by + bh // 2)) < 26:
                             nx1 = min(bx, ox)
                             ny1 = min(by, oy)
@@ -203,49 +219,55 @@ class DashboardVisualizer:
                             ny2 = max(by + bh, oy + oh)
                             bx, by, bw, bh = nx1, ny1, nx2 - nx1, ny2 - ny1
 
-                    # Ignore artifacts in top banner area
-                    if by * scale_y > 28:
+                    if by * scale_y > int(round(28 * sf)):
                         rx1 = max(2, int((bx - 4) * scale_x))
                         ry1 = max(2, int((by - 4) * scale_y))
                         rx2 = min(sub_w - 3, int((bx + bw + 4) * scale_x))
                         ry2 = min(sub_h - 3, int((by + bh + 4) * scale_y))
 
-                        cv2.rectangle(right_resized, (rx1, ry1), (rx2, ry2), (30, 40, 245), 1)
-                        cl = 6
-                        cv2.line(right_resized, (rx1, ry1), (rx1 + cl, ry1), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx1, ry1), (rx1, ry1 + cl), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx2, ry1), (rx2 - cl, ry1), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx2, ry1), (rx2, ry1 + cl), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx1, ry2), (rx1 + cl, ry2), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx1, ry2), (rx1, ry2 - cl), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
-                        cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (40, 60, 255), 2)
+                        box_t = max(1, int(round(1.2 * sf)))
+                        bracket_t = max(2, int(round(2.2 * sf)))
+                        cv2.rectangle(right_resized, (rx1, ry1), (rx2, ry2), (45, 55, 245), box_t)
+                        cl = max(6, int(round(8 * sf)))
+                        cv2.line(right_resized, (rx1, ry1), (rx1 + cl, ry1), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx1, ry1), (rx1, ry1 + cl), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx2, ry1), (rx2 - cl, ry1), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx2, ry1), (rx2, ry1 + cl), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx1, ry2), (rx1 + cl, ry2), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx1, ry2), (rx1, ry2 - cl), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx2, ry2), (rx2 - cl, ry2), (55, 75, 255), bracket_t)
+                        cv2.line(right_resized, (rx2, ry2), (rx2, ry2 - cl), (55, 75, 255), bracket_t)
 
                         target_label = getattr(result, "target_label", None)
                         if not target_label:
                             aspect = (rx2 - rx1) / max(1, (ry2 - ry1))
                             box_w = rx2 - rx1
                             box_h = ry2 - ry1
-                            if box_w >= 36 and box_h >= 16 and aspect > 1.35:
+                            if box_w >= 36 * sf and box_h >= 16 * sf and aspect > 1.35:
                                 target_label = "VEHICLE [ALERT]"
-                            elif aspect > 1.8 and box_h <= 18:
+                            elif aspect > 1.8 and box_h <= 18 * sf:
                                 target_label = "SABOTEUR [ALERT]"
                             else:
                                 target_label = "INTRUDER [ALERT]"
 
-                        cv2.putText(right_resized, target_label, (rx1, max(35, ry1 - 5)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.32, (50, 220, 255), 1, cv2.LINE_AA)
+                        tag_font = 0.35 * sf
+                        tag_y = max(int(round(36 * sf)), ry1 - int(round(6 * sf)))
+                        cv2.putText(right_resized, target_label, (rx1, tag_y),
+                                    cv2.FONT_HERSHEY_SIMPLEX, tag_font, (0, 0, 0), stroke_thick, cv2.LINE_AA)
+                        cv2.putText(right_resized, target_label, (rx1, tag_y),
+                                    cv2.FONT_HERSHEY_SIMPLEX, tag_font, (55, 225, 255), lbl_thick, cv2.LINE_AA)
         else:
-            cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (0, 0, 0), 2, cv2.LINE_AA)
-            cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (10, 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.36, (60, 255, 120), 1, cv2.LINE_AA)
+            cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (lbl_x, lbl_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (0, 0, 0), stroke_thick, cv2.LINE_AA)
+            cv2.putText(right_resized, "LWIR THERMAL FUSION (IRONBOW PALETTE)", (lbl_x, lbl_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, lbl_font, (129, 215, 75), lbl_thick, cv2.LINE_AA)
 
         # Combine side by side
         video_strip = np.hstack([left_resized, right_resized])
 
-        # Bottom Telemetry Bar (No overlap coordinates)
-        hud_bar = np.full((35, self.width, 3), 18, dtype=np.uint8)
+        # Bottom Telemetry Bar (Scaled cleanly to match Obsidian UI)
+        hud_bar = np.full((hud_bar_h, self.width, 3), (18, 16, 16), dtype=np.uint8)
+        cv2.line(hud_bar, (0, 0), (self.width, 0), (45, 45, 50), 1)
         is_cuda = "cuda" in str(getattr(result, "error_map", "")).lower()
         dev_name = "GPU (CUDA)" if is_cuda else "CPU"
         telemetry = (
@@ -254,13 +276,16 @@ class DashboardVisualizer:
             f"FPS: {result.fps:.1f} | "
             f"DEV: {dev_name}"
         )
-        cv2.putText(hud_bar, telemetry, (12, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.37, (180, 190, 200), 1, cv2.LINE_AA)
+        bar_font = 0.38 * sf
+        bar_y = int(round(hud_bar_h * 0.65))
+        cv2.putText(hud_bar, telemetry, (int(round(14 * sf)), bar_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, bar_font, (185, 190, 200), lbl_thick, cv2.LINE_AA)
 
-        state_color = (40, 50, 255) if result.is_anomaly else (40, 245, 60)
+        state_color = (68, 68, 250) if result.is_anomaly else (129, 185, 16)
         state_label = "ALARM: ANOMALY DETECTED" if result.is_anomaly else "STATUS: PERIMETER SECURE"
-        cv2.putText(hud_bar, state_label, (self.width - 220, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.37, state_color, 1, cv2.LINE_AA)
+        (sw, _), _ = cv2.getTextSize(state_label, cv2.FONT_HERSHEY_SIMPLEX, bar_font, lbl_thick)
+        cv2.putText(hud_bar, state_label, (self.width - sw - int(round(14 * sf)), bar_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, bar_font, state_color, lbl_thick, cv2.LINE_AA)
 
         # Vertically stack all panels
         full_frame = np.vstack([graph_panel, video_strip, hud_bar])
