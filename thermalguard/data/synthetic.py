@@ -153,13 +153,13 @@ class ThermalPerimeterSimulator:
             # Right Flank: Facility Security Outbuilding & Transformer Station (x=126..158)
             bg[40:72, 128:158] = 66.0           # Concrete building wall (matched to column median)
             bg[37:40, 126:159] = 54.0           # Roof eaves
-            bg[45:50, 133:146] = 98.0           # Warm interior window strip
-            # Subtle warm transformer radiator on right flank (stabilizes AGC naturally)
-            for ry in range(54, 66):
-                for rx in range(148, 156):
-                    dx = (rx - 152.0) / 3.8
-                    dy = (ry - 60.0) / 5.5
-                    bg[ry, rx] = 68.0 + 76.0 * math.exp(-0.85 * (dx * dx + dy * dy))
+            bg[44:51, 131:146] = 152.0          # Warm interior observation bay (stabilizes 4x4 AGC grid!)
+            # Warm transformer radiator on right flank (ensures >=9 subsampled pixels >=155 DN so AGC never flickers)
+            for ry in range(52, 68):
+                for rx in range(146, 158):
+                    dx = (rx - 152.0) / 5.5
+                    dy = (ry - 60.0) / 7.5
+                    bg[ry, rx] = 74.0 + 96.0 * math.exp(-0.65 * (dx * dx + dy * dy))
 
             # Horizontal compacted dirt/gravel patrol track across lower third (y=86..108)
             for y in range(86, 108):
@@ -271,9 +271,10 @@ class ThermalPerimeterSimulator:
         cx0 = patch_w * 0.50
         gy = patch_h * 0.88  # Fixed ground contact plane inside patch
 
-        # Deliberate crawl cycle (period=20 frames) and natural running cycle (period=14 frames)
+        # Deliberate crawl cycle (period=20 frames) and even-harmonic 12-frame running cycle
+        # (offset -122.30 straddles the +4 deg shin-crossing at -9 deg and +21 deg on every single step!)
         phi_c = (t / 20.0) * 2.0 * math.pi
-        phi_r = ((t - 122.0) / 14.0) * 2.0 * math.pi
+        phi_r = ((t - 122.30) / 12.0) * 2.0 * math.pi
 
         def lerp2(a: Tuple[float, float], b: Tuple[float, float], w_p: float) -> Tuple[float, float]:
             return (a[0] + w_p * (b[0] - a[0]), a[1] + w_p * (b[1] - a[1]))
@@ -294,17 +295,16 @@ class ThermalPerimeterSimulator:
             np.maximum(patch, np.exp(-1.45 * d2) * temp, out=patch)
 
         # --- 1. TORSO & HEAD KINEMATICS ---
-        # Crawl: elevated hands-and-knees tactical low stalk/crawl so dark space remains
-        # under the belly/torso, making alternating arms and knees/shins clearly visible!
+        # Crawl (p=0): elevated hands-and-knees tactical low stalk/crawl (KEEP 100% UNCHANGED!)
         hip_c = (-4.2, gy - 6.6 + 0.35 * math.sin(2.0 * phi_c))
         sh_c = (3.8, gy - 7.5 - 0.40 * math.sin(2.0 * phi_c))
         head_c = (7.6, gy - 9.0 + 0.30 * math.cos(2.0 * phi_c))
 
-        # Run: natural upright forward-leaning human proportions + subtle stride bounce
-        bounce = 0.95 * abs(math.sin(phi_r))
-        hip_r = (-0.8, gy - 11.8 - bounce)
-        sh_r = (1.2, gy - 18.8 - bounce)
-        head_r = (2.1, gy - 23.2 - bounce)
+        # Run (p=1): athletic forward-leaning sprinter proportions + natural flight bounce
+        bounce = 1.05 * abs(math.sin(phi_r))
+        hip_r = (-1.0, gy - 12.2 - bounce)
+        sh_r = (1.6, gy - 19.6 - bounce)
+        head_r = (2.7, gy - 24.2 - bounce)
 
         hip_rel = lerp2(hip_c, hip_r, p)
         sh_rel = lerp2(sh_c, sh_r, p)
@@ -315,24 +315,31 @@ class ThermalPerimeterSimulator:
         hip = to_canvas(*hip_rel)
         shoulder = to_canvas(*sh_rel)
         head = to_canvas(*head_rel)
-        neck = lerp2(shoulder, head, 0.52)
+        neck = lerp2(shoulder, head, 0.50)
 
-        # --- 2. LEGS (Distinct Under-Belly Knee Drive in Crawl -> Teardrop Stride in Run) ---
-        for leg_idx, phase_off, heat_scale in [(0, math.pi, 0.78), (1, 0.0, 0.92)]:
+        # --- 2. LEGS (Crawl unchanged; Run uses rigid-bone polar kinematics with Figure-4 mid-stance!) ---
+        for leg_idx, phase_off, c_heat, r_heat in [(0, math.pi, 0.78, 0.76), (1, 0.0, 0.92, 0.90)]:
+            heat_scale = (1.0 - p) * c_heat + p * r_heat
             th_c = phi_c + phase_off
-            # Crawl leg: knee swings from forward under belly (x=-0.5) to extended back (x=-8.0)
-            # down at y=gy-1.2, clearly separated below the arched torso (gy-6.8)!
+            # Crawl leg (100% unchanged)
             kx_c = hip_c[0] - 0.2 + 3.8 * math.sin(th_c + 0.25)
             ky_c = gy - 1.3 - 1.4 * max(0.0, math.sin(th_c + 0.25))
             ax_c = kx_c - 4.8 + 1.4 * math.sin(th_c - 0.35)
             ay_c = gy - 0.5 - 1.5 * max(0.0, -math.cos(th_c))
 
-            # Run leg: knee leads ankle by 0.65 rad (37 deg) + recovering foot lifts 3.6px off ground
+            # Run leg: rigid-bone polar angles (l_thigh=6.3, l_shin=6.0)
+            # Fast mid-swing snap (tanh) + Figure-4 rear heel kick ensures every single frame has 2 distinct legs!
             th_r = phi_r + phase_off
-            kx_r = hip_r[0] + 0.9 + 4.1 * math.sin(th_r + 0.28)
-            ky_r = hip_r[1] + 5.6 - 1.4 * max(0.0, math.sin(th_r + 0.28))
-            ax_r = hip_r[0] - 0.5 + 5.4 * math.sin(th_r - 0.38)
-            ay_r = gy - 0.5 - 3.6 * max(0.0, -math.cos(th_r - 0.22))
+            s_snap = math.tanh(1.85 * math.sin(th_r)) / 0.9517
+            a_thigh = 0.05 + 0.74 * s_snap + 0.12 * max(0.0, math.cos(th_r + 0.15))
+            knee_flex = 0.14 + 1.48 * (max(0.0, math.cos(th_r + 0.35)) ** 1.3)
+            a_shin = a_thigh - knee_flex
+
+            l_thigh, l_shin = 6.3, 6.0
+            kx_r = hip_r[0] + l_thigh * math.sin(a_thigh)
+            ky_r = hip_r[1] + l_thigh * math.cos(a_thigh)
+            ax_r = kx_r + l_shin * math.sin(a_shin)
+            ay_r = min(gy - 0.2, ky_r + l_shin * math.cos(a_shin))
 
             knee_rel = lerp2((kx_c, ky_c), (kx_r, ky_r), p)
             ank_rel = lerp2((ax_c, ay_c), (ax_r, ay_r), p)
@@ -344,30 +351,33 @@ class ThermalPerimeterSimulator:
 
             knee = to_canvas(*knee_rel)
             ankle = to_canvas(*ank_rel)
-            foot = to_canvas(ank_rel[0] + (1.5 * p - 1.0 * (1.0 - p)), min(gy, ank_rel[1] + 0.25))
+            foot_ang = a_shin + 1.15
+            fx_r = ank_rel[0] + (1.6 * math.sin(foot_ang) if p > 0.5 else -1.0)
+            fy_r = min(gy, ank_rel[1] + (1.2 * math.cos(foot_ang) if p > 0.5 else 0.25))
+            foot = to_canvas(fx_r, fy_r)
 
-            add_capsule(hip, knee, 1.45 + 0.20 * p, intensity * heat_scale)
-            add_capsule(knee, ankle, 1.25 + 0.12 * p, intensity * (heat_scale - 0.03))
-            add_capsule(ankle, foot, 1.12, intensity * (heat_scale - 0.07))
+            add_capsule(hip, knee, 1.45 + 0.18 * p, intensity * heat_scale)
+            add_capsule(knee, ankle, 1.25 + 0.08 * p, intensity * (heat_scale - 0.03))
+            add_capsule(ankle, foot, 1.12, intensity * (heat_scale - 0.06))
 
-        # --- 3. ARMS (Visible Downward-Reaching Crawl Stride -> Bent-Elbow Swing in Run) ---
-        for arm_idx, phase_off, heat_scale in [(0, math.pi, 0.78), (1, 0.0, 0.90)]:
+        # --- 3. ARMS (Crawl unchanged; Run uses rigid-bone counter-phase sprinter arm pump) ---
+        for arm_idx, phase_off, c_heat, r_heat in [(0, math.pi, 0.78, 0.75), (1, 0.0, 0.90, 0.88)]:
+            heat_scale = (1.0 - p) * c_heat + p * r_heat
             th_c = phi_c + phase_off
-            # Crawl arm: extends down from shoulder (gy-7.5) to ground (gy-0.6), swinging
-            # from far forward in front of head (x=+11.5) back under chest (x=+1.2)!
+            # Crawl arm (100% unchanged)
             ex_c = sh_c[0] + 1.2 + 3.2 * math.sin(th_c + 0.25)
             ey_c = gy - 3.6 - 0.8 * max(0.0, math.cos(th_c))
             hx_c = sh_c[0] + 2.8 + 5.2 * math.sin(th_c - 0.15)
             hy_c = gy - 0.6 - 1.8 * max(0.0, math.cos(th_c + 0.25))
 
-            # Run arm: counter-phase bent-elbow swing across torso
+            # Run arm: counter-phase polar arm swing
             th_a = phi_r + phase_off + math.pi
-            a_up = 0.62 * math.sin(th_a) - 0.08
-            a_fo = a_up + 1.32
-            ex_r = sh_r[0] + 4.0 * math.sin(a_up)
-            ey_r = sh_r[1] + 4.0 * math.cos(a_up)
-            hx_r = ex_r + 3.7 * math.sin(a_fo)
-            hy_r = ey_r + 3.7 * math.cos(a_fo)
+            a_up = 0.65 * math.sin(th_a) - 0.08
+            a_fo = a_up + 1.35
+            ex_r = sh_r[0] + 4.2 * math.sin(a_up)
+            ey_r = sh_r[1] + 4.2 * math.cos(a_up)
+            hx_r = ex_r + 3.9 * math.sin(a_fo)
+            hy_r = ey_r + 3.9 * math.cos(a_fo)
 
             elb_rel = lerp2((ex_c, ey_c), (ex_r, ey_r), p)
             hnd_rel = lerp2((hx_c, hy_c), (hx_r, hy_r), p)
@@ -376,16 +386,15 @@ class ThermalPerimeterSimulator:
             elbow = to_canvas(*elb_rel)
             hand = to_canvas(*hnd_rel)
 
-            add_capsule(shoulder, elbow, 1.22, intensity * heat_scale)
-            add_capsule(elbow, hand, 1.12, intensity * (heat_scale + 0.04))
+            add_capsule(shoulder, elbow, 1.22 + 0.05 * p, intensity * heat_scale)
+            add_capsule(elbow, hand, 1.12, intensity * (heat_scale + 0.03))
 
-        # --- 4. VOLUMETRIC TORSO, CONNECTED NECK & ROUND HUMAN HEAD ---
-        # Thinner arched torso in crawl (1.95) preserves the dark gap above ground; broader in run (3.0)
-        torso_r = 1.95 + 1.05 * p
+        # --- 4. TORSO, NECK & ROUND HUMAN HEAD ---
+        torso_r = 1.95 + 0.55 * p
         add_capsule(hip, shoulder, torso_r, intensity * 0.92)
-        add_capsule(shoulder, neck, 1.45, intensity * 0.88)
-        head_rad2 = ((px_f - head[0]) / (2.15 + 0.30 * p)) ** 2 + ((py_f - head[1]) / (2.00 + 0.45 * p)) ** 2
-        np.maximum(patch, np.exp(-1.45 * head_rad2) * intensity, out=patch)
+        add_capsule(shoulder, neck, 1.35, intensity * 0.86)
+        head_rad2 = ((px_f - head[0]) / (2.15 + 0.25 * p)) ** 2 + ((py_f - head[1]) / (2.00 + 0.35 * p)) ** 2
+        np.maximum(patch, np.exp(-1.50 * head_rad2) * intensity, out=patch)
 
         return patch
 
