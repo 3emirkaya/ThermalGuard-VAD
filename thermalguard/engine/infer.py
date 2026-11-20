@@ -96,31 +96,30 @@ class StreamingInferenceEngine:
         prep_frame = self.preprocessor(raw_frame)
         H, W = prep_frame.shape
 
-        # 2. Convert to PyTorch Tensor: (B=1, T=1, C=1, H, W)
-        tensor_frame = torch.from_numpy(prep_frame).view(1, 1, 1, H, W).to(self.device)
-
-        self.buffer.append(tensor_frame)
-        self.raw_buffer.append(raw_frame)
-
-        # Pad initial temporal window if buffer has fewer than clip_len frames
-        if len(self.buffer) < self.clip_len:
-            pad_needed = self.clip_len - len(self.buffer)
-            clip_tensor = torch.cat([self.buffer[0]] * pad_needed + list(self.buffer), dim=1)
-        else:
-            clip_tensor = torch.cat(list(self.buffer), dim=1)
-
-        # 3. Model Forward Pass (Spatio-Temporal Autoencoder)
-        # last_only=True generates only the final time-step for accelerated inference
-        recon_tensor = self.model(clip_tensor, last_only=True)  # (1, 1, 1, H, W)
-        recon_np = recon_tensor[0, 0, 0].cpu().numpy()
-
-        # 4. Error Map & Anomaly Scoring
+        # 2. Error Map & Anomaly Scoring
         target_np = prep_frame
         if self.has_weights:
+            # Convert to PyTorch Tensor: (B=1, T=1, C=1, H, W)
+            tensor_frame = torch.from_numpy(prep_frame).view(1, 1, 1, H, W).to(self.device)
+            self.buffer.append(tensor_frame)
+            self.raw_buffer.append(raw_frame)
+
+            # Pad initial temporal window if buffer has fewer than clip_len frames
+            if len(self.buffer) < self.clip_len:
+                pad_needed = self.clip_len - len(self.buffer)
+                clip_tensor = torch.cat([self.buffer[0]] * pad_needed + list(self.buffer), dim=1)
+            else:
+                clip_tensor = torch.cat(list(self.buffer), dim=1)
+
+            # Model Forward Pass (Spatio-Temporal Autoencoder)
+            recon_tensor = self.model(clip_tensor, last_only=True)  # (1, 1, 1, H, W)
+            recon_np = recon_tensor[0, 0, 0].cpu().numpy()
+
             error_map = self.scorer.compute_error_map(target_np, recon_np)
             score = self.scorer.compute_frame_score(error_map)
         else:
-            # Standalone / Uncalibrated Fallback (Physical Baseline Tracker)
+            # Standalone / Fast Physical Baseline Tracker (skips untrained 3D ConvLSTM CPU bottleneck)
+            self.raw_buffer.append(raw_frame)
             raw_float = cv2.resize(raw_frame.astype(np.float32), (W, H), interpolation=cv2.INTER_AREA)
             if self.bg_model is None:
                 self.bg_model = raw_float.copy()
